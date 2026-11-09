@@ -2,49 +2,33 @@
 
 Status: design options; no implementation. Read policy remains **latest-local-ryow** by default, with explicit exact-version and any-version reads. Redis Software 8.x uses three primary data shards per regional database, plus replicas.
 
-## Decision flow
+## Selected versus configurable
+
+**Selected:** the default read policy is `latest` with local RYOW. Redis Software 8.x and three primary shards per regional database are the platform target. Explicit `required` and `any` reads are also available in the design.
+
+**Still configurable:** distribution, independent acknowledgment, and independent recovery. A–E below are configuration presets for explaining outcomes, not a claim that one deployment preset has been chosen. `local` is the baseline acknowledgment; `all-targets` is opt-in. Independent recovery must be chosen explicitly.
+
+Field names are proposed configuration concepts, not a shipping SDK schema. Active-Active's application `recovery` is not applicable: Redis owns transport, so `recovery=not-applicable` below is descriptive rather than an extra SDK setting.
+
+## Choose a configuration and see its outcome
+
+Each leaf contains the complete configuration and the resulting behavior. Preset identifiers stay the same in the failure diagram below.
 
 ```mermaid
 flowchart TD
-    Start[Choose regional distribution] --> AA{Use Active-Active?}
-    AA -->|Yes| Native[Write once at origin; Redis distributes]
-    Native --> Reads[Apply latest-local-ryow read policy]
-    AA -->|No| Fanout[Adapter sends same immutable snapshot to all configured regions]
-    Fanout --> Recovery{Persist unfinished delivery work?}
-    Recovery -->|Yes| Durable[Durable replay: capture recoverable obligation and retry after restart]
-    Recovery -->|No| Request[Request-only: attempt fan-out again on the next insert or update]
-    Durable --> Ack{When may write return success?}
-    Request --> Ack
-    Ack -->|Origin accepted| Local[Local acknowledgment; remote copies may be missing]
-    Ack -->|Every target verified| All[All-target acknowledgment; partial failure prevents success]
-    Local --> Reads
-    All --> Reads
+    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=latest<br/><br/>Origin success; Redis distributes; remote reads can wait or report missing"]
+    Start -->|independent| Ack{"acknowledgment?"}
+    Ack -->|local| LocalRecovery{"recovery?"}
+    LocalRecovery -->|request-only| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Origin success; next same-session write distributes only its latest version"]
+    LocalRecovery -->|durable-replay| C["Preset C<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Origin success after recoverable capture; worker finishes missing copies"]
+    Ack -->|all-targets| AllRecovery{"recovery?"}
+    AllRecovery -->|request-only| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
+    AllRecovery -->|durable-replay| E["Preset E<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Success only after every target verifies; worker retains unfinished delivery"]
 ```
 
-Distribution, recovery, and acknowledgment are independent choices. Active-Active's managed replication is not the same as enabling the application's durable outbox. In independent mode, select recovery explicitly; durable replay is optional, not a mandatory or implicitly selected feature. Local acknowledgment remains the baseline; all-target verification is opt-in.
+All five presets default to the same read contract. Either explicit read override can be used with any preset, subject to its context requirements. Active-Active plus adapter `all-targets` is not specified in this phase. Durable replay is optional in independent mode and is not implied by local acknowledgment.
 
-## Write acknowledgment and crash recovery
-
-The four independent-backend combinations share the same immutable fan-out operation. Acknowledgment and recovery are separate settings.
-
-```mermaid
-flowchart TD
-    Fanout["Independent regional fan-out"] --> Local{"Acknowledge after origin acceptance?"}
-    Local -->|Yes| LocalReplay{"Durable replay enabled?"}
-    LocalReplay -->|No| B["B: Local + request-only"]
-    LocalReplay -->|Yes| C["C: Local + durable replay"]
-    B --> BResult["Local success allowed; next insert or update sends its snapshot to all regions"]
-    C --> CResult["Local success only after recoverable obligation; worker resumes after crash"]
-    Local -->|No: all targets| AllReplay{"Durable replay enabled?"}
-    AllReplay -->|No| D["D: All-targets + request-only"]
-    AllReplay -->|Yes| E["E: All-targets + durable replay"]
-    D --> DResult["Success only after every target verifies; next insert or update attempts fan-out again"]
-    E --> EResult["Same success barrier; worker can finish saved copies after failure or crash"]
-```
-
-Option A is Active-Active: write once at the origin and let Redis manage transport and recovery under the configured persistence/availability contract. It does not require an application outbox for regional transport.
-
-B and D attempt distribution again on the next insert/update for the same session. Each write distributes only its latest version; a successful later delivery can refresh current local state without replaying earlier versions. With no later write, a region can remain stale. Request-only mode does not retain a crash-surviving historical delivery obligation. A successful all-target write proves placement at acknowledgment under its contract, not permanent availability, rollback of partial copies, or strict geographic consistency.
+B and D attempt distribution again on the next insert/update for the same session. They send only its latest version, without resending earlier versions. With no later write, a region can remain stale. All-target verification proves placement at acknowledgment under its contract, not permanent availability, atomic visibility, or strict geographic consistency.
 
 ## Benefits and costs of each deployment choice
 
@@ -76,48 +60,41 @@ Local + request-only has the least custom recovery machinery among independent o
 
 ## Version 42 when Region B is unavailable
 
-```mermaid
-flowchart TD
-    Write["Origin A accepts snapshot 42; Region B is unavailable"] --> Policy{"Acknowledgment policy?"}
-    Policy -->|Local| Saved{"Durable replay enabled?"}
-    Saved -->|No| Local["Write may succeed locally; next insert or update attempts delivery again"]
-    Saved -->|Yes| Capture["Write succeeds only after recoverable obligation is accepted"]
-    Capture --> Worker["Worker retries B within retention and durability contract"]
-    Policy -->|All targets| Deadline["Cannot return all-target success while B is missing"]
-    Deadline --> Unknown["At deadline return partial or uncertain outcome; preserve IDs and target set"]
-    Unknown --> Repair{"Durable replay enabled?"}
-    Repair -->|Yes| Worker
-    Repair -->|No| NextWrite["Next same-session insert or update fans out its new snapshot"]
-    Local --> Read["B with context returns 42 or proven successor; otherwise snapshot missing at deadline"]
-    Worker --> Read
-    NextWrite --> Read
-```
-
-Active-Active has the local-acknowledgment behavior with Redis-owned transport rather than the application's replay worker. Without context for 42, B's default latest-local read may return 41 or null while delivery is incomplete. No option automatically transfers A's context to B.
-
-An uncertain write does not issue normal successful-write context. Authenticated recovery/handoff may identify its pending immutable snapshot while preserving the uncertain status until reconciled. Partial errors do not mean existing copies were rolled back.
-
-## Read-policy flow
-
-Authorization, context integrity, generation, and expiry checks apply before successful returns. Invalid or lost expected context is an error, distinct from a genuine first read.
+The setup is identical at every leaf: origin A has accepted 42, B is unavailable, and the configured write deadline is finite. B is in the captured target set for all-targets presets. Partial copies are not rolled back.
 
 ```mermaid
 flowchart TD
-    Read["Read at selected regional endpoint"] --> Policy{"Read policy?"}
-    Policy -->|latest: default| Context{"Prior-write context?"}
-    Context -->|No| Candidate["Read valid local candidate; return candidate or null"]
-    Context -->|Yes| Match{"Local candidate proves it follows required write?"}
-    Match -->|Yes| Return["Return eligible candidate; advance context safely"]
-    Match -->|No| LatestWait["Recheck candidate and exact required snapshot within deadline"]
-    LatestWait --> LatestResult["Return required snapshot or proven successor; otherwise snapshot missing"]
-    Policy -->|required: exact version| Exact["Look up only the requested immutable snapshot"]
-    Exact --> Present{"Valid exact snapshot present?"}
-    Present -->|Yes| Snapshot["Return exact snapshot without lowering protected context"]
-    Present -->|No| ExactWait["Wait for exact identity; report snapshot missing at deadline"]
-    Policy -->|any: explicit opt-in| Candidate
+    Write["Origin A accepts version 42; Region B unavailable"] --> Preset{"Which configuration preset?"}
+    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=latest<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
+    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
+    Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Write may succeed after recoverable capture; worker retries B"]
+    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
+    Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
 ```
 
-`required` needs authenticated exact-version context; `any` never replaces protected caller context. Infrastructure, integrity, and context failures remain distinct errors rather than null or snapshot-missing results. An explicitly expired record has the separately defined expired outcome. No flow automatically falls back to an older value after freshness failure.
+For A–C, successful acknowledgment returns context for 42. A later default read carrying that context returns 42/a proven successor, waits, or reports **snapshot missing**. Without transferred context, B can return 41/null while delivery is incomplete.
+
+D–E do not issue normal successful-write context for an uncertain outcome. Authenticated recovery may identify the pending snapshot while preserving that status. A later successful update never retroactively acknowledges the old write. The next diagram applies to reads with valid requirements regardless of which transport preset was used.
+
+## Read configuration and outcomes
+
+`distribution`, `acknowledgment`, and `recovery` remain whichever A–E preset was chosen; they are not silently changed by a read. The leaves below show the effective `readPolicy` and the request inputs that determine each result. Absence and expiry checks assume valid authorization and integrity; invalid/lost expected context, corruption, connectivity, and authentication failures are distinct errors.
+
+```mermaid
+flowchart TD
+    Read["Read using chosen deployment preset A-E"] --> Policy{"readPolicy?"}
+    Policy -->|latest: default| Context{"Valid prior-write context for 42?"}
+    Context -->|No: genuine first read| First["readPolicy=latest<br/>context=none<br/><br/>Return valid local candidate or null; eventual local discovery"]
+    Context -->|Yes| Match{"Local candidate is 42 or a proven successor?"}
+    Match -->|Yes| Current["readPolicy=latest<br/>context=42<br/>candidate=42 or proven successor<br/><br/>Return candidate; advance context safely"]
+    Match -->|No| LatestWait["readPolicy=latest<br/>context=42<br/>candidate=older, absent, or incomparable<br/><br/>Recheck eligible successors and exact 42 until deadline; return eligible state or snapshot missing"]
+    Policy -->|required: exact version| Exact{"Valid exact context for 42; exact 42 present?"}
+    Exact -->|Yes| ExactHit["readPolicy=required<br/>requestedVersion=42<br/>exact42=present<br/><br/>Return exactly 42; never substitute 43 or lower protected context"]
+    Exact -->|No| ExactMiss["readPolicy=required<br/>requestedVersion=42<br/>exact42=missing<br/><br/>Wait only for exact 42; report snapshot missing at deadline"]
+    Policy -->|any: explicit opt-in| Any["readPolicy=any<br/>freshnessRequirement=none<br/><br/>Return valid local candidate or null; older state allowed; preserve protected context"]
+```
+
+An unknown explicit policy is rejected rather than defaulted. A request carrying no context because expected context was lost is also rejected; the first-read leaf is not a silent downgrade path. Explicit expiry uses the separate expired outcome. A higher numeric label alone is not successor proof.
 
 ## Benefits and costs of read policies
 

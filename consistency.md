@@ -1,4 +1,4 @@
-# Consistency and Device A/B behavior
+# Consistency and regional client behavior
 
 The selected contract is **latest local with read-your-own-writes (RYOW)**, named `latest-local-ryow`. This explains the design; [spec.md](spec.md) defines exact behavior. No adapter has been implemented.
 
@@ -19,29 +19,44 @@ These are the four options discussed, not an exhaustive consistency taxonomy. Ac
 
 Independent request-only fan-out can leave missed versions undelivered. It attempts the next same-session write again; without further writes there is no guaranteed convergence. That limitation is distinct from the adapter's rule that a protected read must not return stale success.
 
-## Agreed scenario
+## Reference topology
 
-Client A reads and writes in `us-west-2`; client B independently reads and writes in `us-east-1`. Assume A's write of 42 completes before the reads start, and B has no context from a separate B write for this example. B's local database still has 41 or no record. **A and independent reader B do not communicate:** no context transfer, version notification, or shared latest-version directory is assumed. Data can still arrive through Redis replication or adapter fan-out.
+A1 and A2 each read/write in `us-west-2`; B1 reads/writes in `us-east-1`; C1 reads/writes in `us-east-2`. All four are independent clients. None shares application context, version notifications, or a latest-version directory with another. Each retains context from its own acknowledged writes.
+
+The example places A1 and A2 on the same logical regional Redis database; same-region placement alone does not imply a shared cell, connection, context store, or identical endpoint behavior. If they use different local databases/endpoints, that topology must be declared explicitly. Three primary shards belong to each regional database, not each client: this three-region example has nine primary data shards before replicas.
 
 ```mermaid
-flowchart TD
-    Write["A writes 42 in us-west-2; only A receives write context"] --> A["A reads us-west-2 with its own write context"]
-    A --> AR["Return 42 or proven successor; wait or report snapshot missing"]
-    Write --> Delivery["Redis replication or adapter fan-out transports data"]
-    B["Independent B reads us-east-1; no communication from A"] --> Local["Read valid local candidate"]
-    Local --> Before["Before 42 arrives: 41 or null is permitted; B does not know 42 exists"]
-    Delivery --> After["After 42 arrives and becomes local candidate: B can return 42"]
+flowchart LR
+    subgraph West["us-west-2"]
+        A1["A1: read and write; own context"] --> W["Regional Redis; 3 primary shards"]
+        A2["A2: read and write; separate context"] --> W
+    end
+    subgraph East1["us-east-1"]
+        B1["B1: read and write; own context"] --> E1["Regional Redis; 3 primary shards"]
+    end
+    subgraph East2["us-east-2"]
+        C1["C1: read and write; own context"] --> E2["Regional Redis; 3 primary shards"]
+    end
+    W <-->|Redis replication or adapter fan-out| E1
+    W <-->|Redis replication or adapter fan-out| E2
+    E1 <-->|Redis replication or adapter fan-out| E2
 ```
 
-B does not wait for an unknown A write or report missing 42. Context errors mean invalid/lost context for an actual requirement, not lack of another caller's context. Exact-version reads remain available to callers with valid known-version context; no handoff feature is included. Expiry, integrity, and infrastructure errors remain distinct from snapshot missing.
+Only data transport connects regions in this diagram. Arrows do not imply synchronous acknowledgment or shared client context. In independent mode they represent the configured fan-out paths, with optional durable replay.
 
-Strict geographic differs specifically for B without context: within the same group, a read beginning after completed write 42 must reflect 42 or a later committed update, or fail. Our design permits B's older local state. Across different geographic groups, strict geographic alone does not make foreign projections current.
+## A1 writes version 42
 
-## Both clients write; defaults are unchanged
+A1 receives its write context and its own dependent local reads return 42/a proven successor or report snapshot missing. A2 has no knowledge of A1's write requirement. If the shared regional candidate has been published as 42, A2 can read 42 locally without a WAN replication wait. A1's acknowledgment does not by itself guarantee that a best-effort discovery hint was published, nor does it order every concurrent client write; A2 has no independent RYOW requirement for unknown 42.
 
-If B inserts/updates locally in `us-east-1`, its successful response provides B’s own write context. B’s subsequent default reads must honor that B write or report snapshot missing. A similarly uses its own context in `us-west-2`. Neither client receives the other’s context.
+B1 and C1 each read their own regional database. Before 42 arrives and becomes a local candidate, they may return older local state or null and cannot know 42 exists. Neither waits specifically for A1's unknown version or reports it as missing. After delivery and candidate publication, each can discover 42 locally.
 
-A concurrent B version is not automatically a proven successor to A’s 42. Protected latest uses the existing lineage/provenance rule; it does not invent a global order across the two writers. Independent readers without their own prior-write requirement use local discovery. `latest` remains the default; the region layout does not select a different acknowledgment or recovery mode.
+If A2, B1, or C1 makes its own write, its response establishes that client's own RYOW context. A concurrent version from another client is not automatically a proven successor. Sharing a region does not combine A1 and A2 into one lineage or change the default `latest` read policy.
+
+## Difference from strict geographic consistency
+
+The selected guarantee follows each caller's own context. Strict geographic would require every caller in the group, including A2, B1, and C1, to reflect completed write 42 or a later committed update for reads beginning afterward, or fail. It would not rely on A1 notifying them. Our design allows independent readers to see their local candidate without discovering an unpropagated write.
+
+These three regions belong to the reference US group. Across different geographic groups, strict geographic alone does not make foreign projections current. Authorization, expiry, integrity, infrastructure failures, and missing expected snapshots remain distinct outcomes.
 
 ## Latest, exact, and any are read policies
 
@@ -53,6 +68,6 @@ Latest means the locally selected eligible candidate, not a globally ordered max
 
 ## Next-write refresh and historical gaps
 
-In request-only mode, the next insert/update distributes only its latest version. If B receives proven successor 43 but never receives exact 42, default latest can return 43; exact 42 reports **snapshot missing**. A write for another session does not fill this gap. Durable replay optionally retains original delivery obligations.
+In request-only mode, the next insert/update distributes only its latest version. If a client carrying context for 42 receives proven successor 43 but never receives exact 42, default latest can return 43; exact 42 reports **snapshot missing**. A write for another session does not fill this gap. Durable replay optionally retains original delivery obligations.
 
 Neither replay nor waiting for all target copies creates strict commit ordering. Three primary data shards partition storage, not consistency scope. Snapshot presence and caller context also do not prove current authorization after another device's logout; immediate cross-device revocation requires a separate security contract. See [backends.md](backends.md).

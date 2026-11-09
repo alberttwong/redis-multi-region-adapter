@@ -8,13 +8,13 @@ A session request can move regions before its last update has propagated. The de
 
 The selected contract is **latest local with read-your-own-writes (RYOW)**. The default read can use a later locally known snapshot only when its history proves it succeeds the caller's write. Otherwise it retrieves the required snapshot or reports it as missing after bounded waiting. Exact-version and any-version reads are explicit options.
 
-## Agreed Device A/B scenario
+## Agreed regional clients
 
-Client A reads and writes in `us-west-2`; independent client B reads and writes in `us-east-1`. They have no direct or out-of-band application communication: no shared write token, context handoff, revision notification, or shared latest-version directory. Redis-managed replication or adapter fan-out still transports session data between regional databases.
+A1 and A2 both read and write in `us-west-2`. B1 reads/writes in `us-east-1`; C1 reads/writes in `us-east-2`. All clients are independent and do not exchange write context, version IDs, notifications, or shared latest-version metadata. Redis replication or adapter fan-out still transports session data.
 
-A writes 42 in `us-west-2` and receives context. A's subsequent local reads return 42/a proven successor or report snapshot missing. B reads local `us-east-1` Redis state, using context from B's own acknowledged writes when present. Before 42 arrives and becomes its local candidate, B may see 41 or null and cannot know that 42 exists. B has no freshness wait for A's unknown write. B’s own write establishes a separate protected context; A receives no notification of it. This regional arrangement does not change the latest-local + RYOW default.
+A1's acknowledged write of 42 protects A1's own dependent reads. A2 may discover it through the shared regional Redis database after candidate publication, with no WAN hop, but same-region placement does not transfer A1's context or guarantee cross-client latest state. B1/C1 can read older local state or null until data arrives and is selected locally. Each client's own writes establish its separate RYOW requirement.
 
-This is not strict geographic consistency. The guarantee follows A's own context; it is not automatically shared with B. Detailed examples live in [consistency.md](consistency.md).
+The example assumes A1/A2 use the same logical regional Redis database; confirm endpoint/cell layout before implementation. Defaults remain latest-local + RYOW with local acknowledgment as baseline and independent recovery explicitly selected. See [consistency.md](consistency.md).
 
 ## Platform and delivery choices
 

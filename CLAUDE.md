@@ -9,7 +9,7 @@ Documentation-only repository. Start with README.md, then spec.md and plan.md. N
 - Recheck both the local candidate and required snapshot while waiting on a default read. Explicit `required` returns only the exact requested snapshot. Explicit `any` permits older valid local state or null.
 - Describe an absent expected snapshot as **snapshot missing**; keep infrastructure, integrity, context, and expiry outcomes distinct.
 - A writes 42 and reads with context: 42/proven successor. B without transferred context may see 41/null. B with context must satisfy it or report missing.
-- Independent request-only mode refreshes through the next insert/update's complete snapshot, not mandatory manual repair or historical replay. Durable replay is optional; capture its obligation before success when enabled.
+- Independent request-only mode refreshes through the next insert/update's latest version, not mandatory manual repair or historical replay. Durable replay is optional; capture its obligation before success when enabled.
 - Local acknowledgment is the baseline. Optional independent all-target acknowledgment verifies placement, not strict ordering. Never silently drop a target on timeout.
 - Serialize writes per caller lineage; prevent response/context rollback. No fixed home cluster, automatic remote read fallback, or strict geographic/global guarantee.
 - Never log session payloads, raw context, bearer IDs, or credentials.

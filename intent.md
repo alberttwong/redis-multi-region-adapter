@@ -18,7 +18,7 @@ This is not strict geographic consistency: B without context need not see anothe
 
 Use Redis Software 8.x with three primary data shards per regional database, plus separately sized replicas. Offer Active-Active or independent regional databases with adapter-managed fan-out. No fixed session home cluster or request-path session service is required.
 
-Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's complete snapshot again; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
+Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's latest version; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
 
 Reference geography is US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units and do not automatically correspond to Redis databases.
 

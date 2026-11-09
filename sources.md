@@ -32,7 +32,7 @@ All user decisions below were made on 2026-11-09. They select scope, not every p
 - Default **latest locally known while honoring the caller's last write (RYOW)**. Explicit exact-version and any-version reads remain available. Strict geographic/global consistency is deferred.
 - The agreed Device A/B behavior in consistency.md: another device without transferred context can read stale local state; authenticated context adds a freshness requirement.
 - Durable replay is optional. Independent acknowledgment and recovery are separate choices; no particular recovery combination is selected. Local acknowledgment remains the baseline, with all-target verification an explicit option.
-- Request-only mode attempts distribution again on the next same-session insert/update, rather than requiring manual repair as its normal flow. It need not fill historical gaps. Describe an absent expected exact snapshot as **snapshot missing**.
+- Request-only mode distributes only the latest version on the next same-session insert/update, rather than requiring manual repair as its normal flow. No complete snapshot or historical resend is required. It need not fill historical gaps. Describe an absent expected exact snapshot as **snapshot missing**.
 - Prefer diagrams for configuration and failure flows. Keep the README consistency summary short and walkthroughs in the detailed guide.
 
 ## Open decisions before implementation

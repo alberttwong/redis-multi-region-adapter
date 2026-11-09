@@ -47,6 +47,6 @@ Latest means the locally selected eligible candidate, not a globally ordered max
 
 ## Next-write refresh and historical gaps
 
-In request-only mode, the next insert/update sends its complete snapshot again. If B receives proven successor 43 but never receives exact 42, default latest can return 43; exact 42 reports **snapshot missing**. A write for another session does not fill this gap. Durable replay optionally retains original delivery obligations.
+In request-only mode, the next insert/update distributes only its latest version. If B receives proven successor 43 but never receives exact 42, default latest can return 43; exact 42 reports **snapshot missing**. A write for another session does not fill this gap. Durable replay optionally retains original delivery obligations.
 
 Neither replay nor waiting for all target copies creates strict commit ordering. Three primary data shards partition storage, not consistency scope. Snapshot presence and caller context also do not prove current authorization after another device's logout; immediate cross-device revocation requires a separate security contract. See [backends.md](backends.md).

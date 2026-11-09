@@ -16,7 +16,7 @@ Deployment has three separate choices:
 - **Acknowledgment:** local by default; independent mode can explicitly wait for all configured targets.
 - **Recovery in independent mode:** request-only next-write refresh, or optional durable replay.
 
-Without durable replay, the next insert/update for the same session sends its new complete snapshot to all configured regions again. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
+Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
 Read policies are `latest` by default, explicit `required` for one exact version, and explicit `any` for any valid local candidate. None promises the latest completed update across all devices or regions.
 

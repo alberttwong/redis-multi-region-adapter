@@ -5,7 +5,7 @@ Use [spec.md](spec.md) as the behavior contract, [plan.md](plan.md) for scope, a
 ## Review passes
 
 1. **Read correctness:** validate context, candidate/successor proof, exact lookup, bounded waiting, and outcome classification. Default latest must recheck candidates while waiting; exact reads never substitute a successor. No stale success, implicit downgrade, or missing-context bypass.
-2. **Write lifecycle:** inspect full-snapshot construction, single-lineage sequencing, response reordering, idempotent retries, partial outcomes, and identity/content collisions. A next write is not a retroactive acknowledgment of an uncertain prior write.
+2. **Write lifecycle:** inspect latest-version construction, single-lineage sequencing, response reordering, idempotent retries, partial outcomes, and identity/content collisions. A next write is not a retroactive acknowledgment of an uncertain prior write.
 3. **Distribution and recovery:** Active-Active writes once. Independent fan-out copies the same immutable envelope, not a repeated business mutation. Request-only refreshes on the next same-session insert/update. Enabled durable replay requires recoverable capture, expiry-safe delivery, no loops, retention, backpressure, and catch-up. All-target success verifies every captured member without timeout-driven shrinkage.
 4. **Security and operations:** verify token/caller binding, authorized cross-device transfer, generation/expiry handling, exact backend compatibility, three primary shards per database, pooling, restore, and sanitized telemetry. Require integration evidence for each supported backend/recovery combination; request-only does not require a worker.
 

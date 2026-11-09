@@ -19,7 +19,7 @@ The independent option retains Redis Software 8.x; it does not establish a Redis
 
 ## Fan-out and acknowledgment
 
-Every independent insert/update produces a complete immutable snapshot and attempts delivery to all configured targets. Copies reuse its original ID, payload, digest, generation, and absolute expiry. Reapplying identical content is a no-op; conflicting identity/content is an integrity error. Copying must not repeat business-side mutations or trigger recursive re-export.
+Every independent insert/update identifies its latest version and attempts delivery to all configured targets. Copies reuse its original ID, payload, digest, generation, and absolute expiry. Reapplying identical content is a no-op; conflicting identity/content is an integrity error. Copying must not repeat business-side mutations or trigger recursive re-export.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ Target scope is explicit: US-only verification is not verification of every glob
 
 `request-only` attempts delivery during bounded request execution and records observable outcomes without persisting unfinished work. Local success may precede remote completion. Process exit can abandon in-memory attempts.
 
-The next insert/update **for the same session** sends its new complete snapshot to all configured targets again. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.
+The next insert/update **for the same session** sends only its latest version to all configured targets. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.
 
 Default `latest` can return 43 to a caller requiring 42 only when 43 is a proven successor. Exact `required` 42 still reports **snapshot missing** if 42 is absent. A write for another session does not refresh this one. A later successful write never retroactively acknowledges an uncertain earlier write.
 
@@ -55,6 +55,6 @@ Replay can finish a timed-out all-target write, but the original outcome remains
 
 At a destination, apply the immutable snapshot before publishing its discovery hint. Do not roll the hint back within a proven lineage. Incomparable lineages need a deterministic candidate-selection rule, not a fabricated global revision order. Protected reads validate the candidate against caller context regardless of delivery order.
 
-With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Request-only does not promise historical backfill: admit targets for future full-snapshot writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
+With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Request-only does not promise historical backfill: admit targets for future latest-version writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
 
 Restored targets do not become fresh merely because their endpoint is healthy. Revalidate eligibility and let protected reads enforce snapshot/lineage checks. Recovery must preserve configuration epochs and never reinterpret a missing expected snapshot as authorization or an ordinary eventual miss.

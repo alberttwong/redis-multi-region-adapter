@@ -19,6 +19,16 @@ These are the four options discussed, not an exhaustive consistency taxonomy. Ac
 
 Independent request-only fan-out can leave missed versions undelivered. It attempts the next same-session write again; without further writes there is no guaranteed convergence. That limitation is distinct from the adapter's rule that a protected read must not return stale success.
 
+## Infrastructure by consistency level
+
+Eventual and RYOW can use either Redis Software Active-Active or independent regional clusters. Active-Active owns replication, CRDT conflict resolution, and convergence. Independent clusters move those distribution and recovery obligations into the application. RYOW adds caller context and protected-read checks with either backend; asynchronous Active-Active replication alone does not prove that a destination contains the caller's acknowledged write.
+
+For future **strict geographic** and **strict global** modes, the project direction is to use **Active-Active as the replication base**, avoiding a custom regional replication and convergence implementation. Independent-cluster implementations of those strict modes are outside the planned scope. This is an architectural choice to reduce application code, not a claim that Active-Active is mathematically necessary or sufficient for strict consistency.
+
+Here, strict geographic means per-session linearizability within a geographic group; strict global extends that scope across all groups. Both still require a separately designed authority/commit protocol that orders concurrent writes, establishes which state reads may return, fences obsolete writers, and handles partitions and recovery. The strict scope must coordinate or refuse operations when it cannot establish the guarantee. Redis's optional causal ordering does not replace that protocol. No such strict overlay is specified, and its compatibility with Active-Active must be validated before implementation.
+
+The [README consistency table](README.md#consistency) summarizes this infrastructure split. The current `latest-local-ryow` contract and its two backend choices remain the implementation target.
+
 ## Reference topology
 
 The six independent clients read/write locally:

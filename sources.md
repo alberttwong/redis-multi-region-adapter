@@ -1,69 +1,48 @@
-# Sources and decision record
+# Sources and decisions
 
-Prepared: 2026-11-09. Customer identities and workload branding have intentionally been omitted from the authored documents.
+Updated: 2026-11-09. Authored documents omit customer identities and workload branding. This file records provenance and decision status; [spec.md](spec.md) owns behavior.
 
-## Precedence
+## Precedence and artifact ownership
 
-1. Direct user instructions govern scope and target platform: neutral multi-region session consistency, Redis Software 8.x, Active-Active, three shards, the subsequently selected read-your-own-writes target, explicit required-version/any-version read options for Device B, and latest known locally while honoring the caller’s last write as the default.
-2. The [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook) is the primary process reference for intent and requirements artifacts. It does not supply this project's session semantics or select its architecture.
-3. The [source presentation](https://docs.google.com/presentation/d/1tuLl3Pg6Zyto0dmEB0aw5u6Z9d2yOaoWv9cvoz4__x4/edit?slide=id.s1_read_hits_misses_20261105#slide=id.s1_read_hits_misses_20261105) supplies technical context. Readable connector content covered all 30 slides, including the linked S1 read slide. This task did not modify the deck or read its linked PRD.
-4. Official Redis documentation supplies capability boundaries; new schemas, APIs, and test cases in this repository are design proposals.
+Direct user instructions take precedence over the source deck and process guidance. The [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook) guides the intent/specification/plan chain, verification, review, and maintenance feedback. It does not choose session semantics or install controls.
 
-The playbook supplies the intent/specification/plan artifact chain, review guidance, verification expectations, and a maintenance feedback path. These files adapt that structure to this project; they do not reproduce the article or claim its example tooling has been installed.
+Repository Markdown is the design source of truth. intent.md states the outcome; spec.md defines behavior; backends.md defines distribution obligations; consistency.md explains the guarantees; decisions.md illustrates combinations. plan.md, validation.md, and operations.md define proposed implementation, proof, and operation. CLAUDE.md and REVIEW.md summarize instructions without overriding the specification.
 
-## Deck mapping
+## Technical provenance
 
-| Source slides | Interpretation retained |
-| --- | --- |
-| 2–4 | Stale values and absent records are distinct; geographic strictness differs from global strictness |
-| 5–16 | Replication, acknowledgment, freshness, and packaging are separate choices; a barrier alone does not provide strictness |
-| 17–21 | SDK packaging preferred; S1 needs extra authority; owner-cluster affinity conflicts with no-home requirement |
-| 22–24 | Epoch-based membership, recovery, and asynchronous foreign-group behavior matter |
-| 25–26 | L1, L2, and S1 all remain candidates; illustrative API is not a shipped interface |
-| 27 | Cells scale independently of Redis participant membership |
-| 28, linked slide | S1 validates current commit before same-cell, same-region, or cross-region lookup; misses are `null`, failures are errors |
-| 29–30 | L1/L2 exact-record lookup has no current-revision discovery; L2 adds geographic placement verification |
+The [source presentation](https://docs.google.com/presentation/d/1tuLl3Pg6Zyto0dmEB0aw5u6Z9d2yOaoWv9cvoz4__x4/edit?slide=id.s1_read_hits_misses_20261105#slide=id.s1_read_hits_misses_20261105) was read through connector text covering all 30 slides, including the linked S1 read slide. Its linked PRD was not read, and the deck was not modified.
 
-Earlier slides emphasize a stronger strict geographic target; later slides explicitly reopen the contract choice. The user subsequently selected read-your-own-writes on 2026-11-09. That instruction supersedes the shortlist for current scope. The adapter now adds caller context and protected freshness waits; plain L1 misses do not meet the selected guarantee. L2 and S1 remain historical alternatives only.
+Slides 2–4 distinguish stale/absent state and consistency levels; 5–16 separate replication, acknowledgment, freshness, and packaging; 17–24 discuss SDK packaging, strict authority, membership, and failure costs; 25–30 retain L1/L2/S1 alternatives and describe cells, exact snapshots, and misses. Those are historical source choices. Later user decisions below supersede the shortlist: strict S1 is deferred, while optional all-target placement resembles the earlier L2 barrier.
 
-## Verified product references
+Product references previously checked on 2026-11-09:
 
-- [Redis Software 8.0.x release notes](https://redis.io/docs/latest/operate/rs/release-notes/rs-8-0-releases/): distinguish product build from database compatibility version.
-- [Active-Active overview](https://redis.io/docs/latest/operate/rs/databases/active-active/): CRDT replication and eventual convergence.
-- [Causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/): causal operation ordering does not itself establish destination catch-up for a moving caller.
-- [WAIT](https://redis.io/docs/latest/commands/wait/): replica acknowledgment limitations; not proof of strong consistency.
-- [Transactions](https://redis.io/docs/latest/develop/using-commands/transactions/): local transaction semantics; not a regional distributed transaction manager.
+- [Redis Software releases](https://redis.io/docs/latest/operate/rs/release-notes/rs-8-0-releases/): product build and database compatibility version are separate checks.
+- [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/): convergence and causal ordering do not establish a destination's current freshness.
+- [Replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/): primary/replica replication is not synchronization between independent writable databases.
+- [WAIT](https://redis.io/docs/latest/commands/wait/) and [transactions](https://redis.io/docs/latest/develop/using-commands/transactions/): do not supply the proposed geographic strict protocol.
 
-These references were checked on 2026-11-09. No exact-version support matrix, vendor endorsement of S1, or deployed configuration was obtained.
+No exact-build support matrix, deployed configuration, vendor approval of a strict protocol, or measured service levels have been obtained. Snapshot/context schemas, fan-out, and workers are proposed application design.
 
-## Decisions and concerns
+## Selected decisions
 
-| ID | State | Decision or question | Suggested reviewer |
-| --- | --- | --- | --- |
-| D01 | Extended by user | Redis Software 8.x: Active-Active plus a non-Active-Active regional option | Platform owner, unassigned |
-| D02 | Assumption | Three primary data shards per regional instance; replicas additional | Platform owner, unassigned |
-| D03 | Selected by user, 2026-11-09 | Target read-your-own-writes across regions; defer geographic barriers and strict consistency | Repository owner |
-| D04 | Open | Pin Software build, compatibility version, replicas, persistence, and supported commands | Platform owner, unassigned |
-| D05 | Open | Define payload size, traffic, latency, timeout, retention, RPO, and RTO | Service owner, unassigned |
-| D06 | Deferred | Strict authority, ordering, fencing, and handoff belong to a future strict-consistency scope | Technical lead, unassigned |
-| D07 | Open | Define revocation/expiry semantics and session data classification | Security owner, unassigned |
-| D08 | Open | Select language, client, packaging, and CI/deployment system | Technical lead, unassigned |
-| D09 | Open | Assign artifact reviewers and production release authority | Repository owner |
-| D10 | Proposed | Caller-carried immutable snapshot identity; bounded wait at selected endpoint; no automatic remote fallback | Technical lead, unassigned |
-| D12 | Requested by user; exact-version interpretation documented; semantics documented 2026-11-09 | Device B can request an exact required version or explicitly accept any local version; authenticated handoff and local hint are proposed implementation details | Repository owner / technical lead |
-| D13 | Selected by user, 2026-11-09 | Default to latest known locally while honoring the caller’s last write (RYOW); exact and any remain explicit options | Repository owner |
-| D15 | Agreed by user, 2026-11-09 | A reads its acknowledged write locally with context; B without transferred context may read old local state or null. Strict geographic is not selected. | Repository owner |
-| D14 | Open | Verify local-candidate lineage/incorporation proof and context advancement under the selected sequencing mechanism | Technical lead, unassigned |
-| D11 | Open | Choose secure context transport, write serialization, response ordering, token lifetime, and retry reconciliation | Technical lead, unassigned |
+All user decisions below were made on 2026-11-09. They select scope, not every proposed implementation mechanism.
 
-For future acceptance, append artifact revision, reviewer, date, decision, rationale, and review/commit link. Do not fill these with inferred approvals.
+- Redis Software 8.x, with Active-Active and an additional non-Active-Active option. The independent regional fan-out architecture is the proposed implementation of that additional option.
+- Three shards; interpreting this as three primary shards per regional database, with replicas additional, remains a sizing assumption to confirm.
+- Default **latest locally known while honoring the caller's last write (RYOW)**. Explicit exact-version and any-version reads remain available. Strict geographic/global consistency is deferred.
+- The agreed Device A/B behavior in consistency.md: another device without transferred context can read stale local state; authenticated context adds a freshness requirement.
+- Durable replay is optional. Independent acknowledgment and recovery are separate choices; no particular recovery combination is selected. Local acknowledgment remains the baseline, with all-target verification an explicit option.
+- Request-only mode attempts distribution again on the next same-session insert/update, rather than requiring manual repair as its normal flow. It need not fill historical gaps. Describe an absent expected exact snapshot as **snapshot missing**.
+- Prefer diagrams for configuration and failure flows. Keep the README consistency summary short and walkthroughs in the detailed guide.
 
-## Conversation decisions consolidated
+## Open decisions before implementation
 
-The user selected RYOW, then requested cross-device exact-version or any-version reads. Exact 42 was explained as a specific immutable snapshot, not latest or at-least-42. The user subsequently required latest as the default and explicitly selected “latest known locally, while honoring the caller’s last write (RYOW)” when asked to choose its scope. This latest selection supersedes the earlier proposed required-version default, while preserving exact and any as explicit options. Strict geographic/global consistency remains deferred. Device B’s missing 42 still needs transferred authenticated context to enforce that requirement.
+Assign the responsible owners; no names or approvals are inferred.
 
-## Additional backend option
+1. **Platform:** pin product/database/client builds, supported commands per mode, replica layout, persistence/eviction, shard capacity, target discovery, and authoritative configuration-epoch storage.
+2. **Context and lineage:** choose language/framework, token transport and binding, write serialization across app instances, response-order protection, device handoff, provenance/sequence evidence, and candidate selection for incomparable lineages. A signed token alone does not solve branching writes.
+3. **Distribution:** select supported acknowledgment/recovery combinations, capture/worker technology when replay is enabled, slot-scoped outbox discovery across three shards, idempotency/conflict handling, target readiness, and replay/catch-up retention.
+4. **Service and security:** agree payload/token limits, latency/throughput targets, deadlines, expiry/skew, context/record lifetime, RPO/RTO, revocation/authorization responsibilities, and incident ownership.
+5. **Delivery:** choose CI/provisioning, artifact reviewers, production release authority, and rollout/rollback checks.
 
-The user requested a Redis 8.x option without Active-Active and asked why the adapter cannot write to all regions. It can: backends.md proposes independent regional Redis Software 8.x databases with idempotent adapter-managed fan-out and durable replay. The Software product and three-primary-shard layout are retained from prior requirements. Acknowledgment and recovery are separate choices: local versus all-targets, and request-only versus optional durable replay. The user subsequently clarified durable replay is an option; it is not a mandatory independent-backend dependency. These are implementation proposals; the user has not selected a capture technology or final persistence contract. Read policy stays latest-local-ryow. Ordinary [Redis replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) is leader/follower replication, not automatic independent writable database synchronization (checked 2026-11-09).
-
-The user requested a flow/decision table, then preferred diagrams and clarified durable replay is optional. decisions.md diagrams all combinations and their partial-failure outcomes. The read default remains latest-local-ryow; no particular independent recovery combination has been selected.
+For each resolved decision, record artifact revision, reviewer, date, rationale, and review/commit link. Document generation and PR submission do not constitute technical or production acceptance.

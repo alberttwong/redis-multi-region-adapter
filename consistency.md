@@ -1,65 +1,52 @@
-# Consistency levels and read policies
+# Consistency and Device A/B behavior
 
-Updated: 2026-11-09. This document consolidates the conversation; [spec.md](spec.md) defines the proposed adapter behavior. No adapter has been implemented.
+The selected contract is **latest local with read-your-own-writes (RYOW)**, named `latest-local-ryow`. This explains the design; [spec.md](spec.md) defines exact behavior. No adapter has been implemented.
 
-## Current target
+## What the four levels mean
 
-**Read-your-own-writes (RYOW), defaulting to latest known locally while honoring the caller’s last acknowledged write.** Explicit exact-version and any-version reads are also supported by the design. Redis Software 8.x with three primary data shards per regional database remains the platform. [Backend options](backends.md) include Active-Active and independent databases with adapter-managed fan-out. Replica shards are additional.
+```mermaid
+flowchart TD
+    Scope["Which guarantee is needed?"] --> Eventual["Eventual: regional values can differ until delivered updates converge"]
+    Scope --> RYOW["RYOW: honor this caller's acknowledged write using its context"]
+    Scope --> Geo["Strict geographic: every caller shares an ordered session history within the group"]
+    Scope --> Global["Strict global: ordered session history spans geographic groups"]
+    RYOW --> Selected["Selected: latest local constrained by caller context"]
+    Geo --> Deferred["Deferred: needs shared ordering, safe reads, fencing, and recovery"]
+    Global --> Deferred
+```
 
-## Four consistency levels discussed
+These are the four options discussed, not an exhaustive consistency taxonomy. Active-Active supplies strong eventual convergence; “strong eventual” does not mean strict. Optional causal ordering does not prove that a destination has caught up. See [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).
 
-| Level | Meaning | Redis versus adapter responsibility | Current scope |
-| --- | --- | --- | --- |
-| Eventual | Regional state can differ until updates converge | Active-Active provides replication and convergence | Foundation; reads without a freshness requirement are eventual |
-| Read your own writes | A caller’s dependent reads reflect its acknowledged writes, or fail explicitly when unavailable | Middleware carries context; adapter validates state and waits within a deadline | Selected |
-| Strict geographic | All callers share a per-session linearizable history within the geographic authority group | Requires ordered commits, safe reads, fencing, and durable recovery in addition to the adapter | Deferred |
-| Strict global | Equivalent ordering across geographic groups | Requires cross-group coordination and recovery | Deferred |
+Independent request-only fan-out can leave missed versions undelivered. It attempts the next same-session write again; without further writes there is no guaranteed convergence. That limitation is distinct from the adapter's rule that a protected read must not return stale success.
 
-These four labels describe the options discussed, not every possible consistency model. Redis’s term “strong eventual consistency” does not mean strict consistency. Optional causal ordering does not itself mean a destination has caught up. See the [Active-Active overview](https://redis.io/docs/latest/operate/rs/databases/active-active/) and [causal consistency documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).
+## Agreed scenario
 
-## Read policies
+Assume A's write of 42 completes before the reads start. Region B still has 41 or no record.
 
-| Policy | Behavior | If the required state is missing |
-| --- | --- | --- |
-| `latest` — default | Return the local candidate if it matches or provably incorporates the caller’s required state; otherwise retrieve that required snapshot | Bounded local wait, then freshness error |
-| `required` — exact version | Return only the requested immutable snapshot, such as 42 | Bounded local wait, then freshness error |
-| `any` — explicit opt-in | Return the locally selected valid candidate, possibly older/newer; no required-version check | `null` if absent; infrastructure failures remain errors |
+```mermaid
+flowchart TD
+    Write["A writes 42 in Region A and receives context"] --> A["A reads Region A with context"]
+    A --> AR["Return 42 or proven successor; otherwise report snapshot missing"]
+    Write --> B["B reads Region B"]
+    B --> Token{"Does B carry authenticated context for 42?"}
+    Token -->|No| Old["Local 41 or null is permitted"]
+    Token -->|Yes| Protected["Return 42 or proven successor; wait locally or report snapshot missing"]
+```
 
-Without prior-write context, `latest` is eventual local discovery and may return `null`. Missing expected context is an error, distinct from a genuine first read. Exact reads require authenticated version context. None of the policies bypasses authorization, integrity, generation, or expiry validation. The adapter never automatically downgrades a failed latest/required request to any.
+Devices do not automatically share context. An authorized handoff can give B the freshness requirement without strict geographic consistency. Expiry, integrity, and infrastructure errors remain distinct from a missing snapshot.
 
-“Latest” here is the local discovery rule, not the latest completed update across the geographic group or the world. Concurrent unrelated devices do not automatically share a totally ordered revision sequence. A local hint may lag or select an incomparable candidate. The adapter must honor the carried write even then; it may return the required snapshot instead of that candidate. A future general at-least-version API or global latest discovery needs separate design.
+Strict geographic differs specifically for B without context: within the same group, a read beginning after completed write 42 must reflect 42 or a later committed update, or fail. Our design permits B's older local state. Across different geographic groups, strict geographic alone does not make foreign projections current.
 
-## Device A and Device B
+## Latest, exact, and any are read policies
 
-A writes 42 in Region A and receives context. Device B reads in Region B, where 42 has not arrived.
+Default `latest` considers the local candidate and checks it against carried context. A proven successor 43 may satisfy context 42. An unrelated device's numeric label 43 is not proof; incomparable histories remain incomparable. During a default wait, recheck eligible candidates as well as exact 42.
 
-- B carries authenticated context for 42: default latest or explicit required must retrieve/wait for 42, or return a freshness error. Another device can receive this guarantee through authenticated context handoff; this does not require strict geographic consistency.
-- B has no context and uses default latest: return locally discovered state, perhaps 41, or `null`. B cannot infer that an unpropagated 42 exists.
-- B explicitly selects any: local 41 is acceptable, and absence can return `null`. This is a deliberate eventual read.
-- B carries context for 42 and local 43 is available: default latest can return 43 only if its provenance proves it incorporates 42. Explicit required 42 still returns exactly 42. An unrelated numerical label 43 is insufficient proof.
+Explicit `required` means exactly 42, even if 43 exists. Explicit `any` accepts any valid locally selected version, including older state, and can return null. With genuinely no prior context, default latest also has eventual local discovery semantics. Lost expected context must not become a first read or an implicit any read.
 
-For example, if another device completes a new update after 42, RYOW alone need not expose it to B. Strict geographic would require reflecting that completed update for reads beginning afterward in the group. Immediate cross-device logout/revocation likewise needs a separately defined authorization guarantee.
+Latest means the locally selected eligible candidate, not a globally ordered maximum across every stored snapshot. “At least 42” would require a proven history relation; a general minimum-version API and global latest discovery are deferred. [decisions.md](decisions.md) diagrams the read flow.
 
-## Agreed scenario and strict geographic comparison
+## Next-write refresh and historical gaps
 
-Assume A's write of 42 has completed before either read begins, B's region still has 41 or no record, and both regions belong to the same geographic group for the strict comparison. Both devices use the default `latest` policy.
+In request-only mode, the next insert/update sends its complete snapshot again. If B receives proven successor 43 but never receives exact 42, default latest can return 43; exact 42 reports **snapshot missing**. A write for another session does not fill this gap. Durable replay optionally retains original delivery obligations.
 
-| Read | Selected design: latest local + RYOW | Strict geographic alternative |
-| --- | --- | --- |
-| Device A reads Region A with write context | Return 42 or a proven local successor; otherwise fail explicitly | Reflect 42 or a later committed update, or fail |
-| Device B reads Region B without context for 42 | Local 41 or `null` is permitted; after replication, 42 can become the local candidate | Must reflect 42 or a later committed update; stale success and an absent result caused solely by propagation lag are forbidden |
-| Device B reads Region B with authenticated context for 42 | Return 42 or a proven local successor; wait locally if needed, then return freshness error at deadline | Same minimum completed-write obligation applies regardless of caller context |
-
-The selected guarantee follows caller context. Strict geographic establishes one per-session linearizable history for all callers in the group, so B does not need A's token to observe a completed update. It requires a shared ordering and safe-read/recovery protocol beyond replication and adapter polling. A geographic write-copy barrier alone is insufficient. Regions in different geographic groups would need a separately defined cross-group guarantee; strict geographic alone does not make foreign projections current.
-
-The user agreed to this scenario. Device B does not automatically inherit Device A's context. Default local reads can therefore remain stale for other devices; this is accepted behavior, not an implementation defect. Immediate cross-device revocation is not supplied by the selected guarantee.
-
-## Transport does not choose the consistency level
-
-The adapter can write the same immutable snapshot to all independent regional databases. Local acceptance with optional durable replay preserves the default asynchronous behavior. Waiting for all target copies strengthens placement at acknowledgment and increases write latency/availability dependence; it does not order concurrent writes or establish strict geographic reads. The agreed A/B scenario still describes default local acknowledgment. Active-Active and independent modes share the same context and read-policy rules.
-
-Independent request-only mode makes no eventual-delivery promise after a failed copy or process crash. Protected reads still fail safely, but convergence needs external repair. See [decisions.md](decisions.md) for combinations.
-
-## Terminology
-
-Exact 42 means one immutable identity within its session generation/lineage. “At least 42” requires a proven ordering or incorporates relationship. Latest local uses the accepted candidate-selection rule; latest group/global needs a stronger authority. Three data shards partition storage and do not change these consistency guarantees.
+Neither replay nor waiting for all target copies creates strict commit ordering. Three primary data shards partition storage, not consistency scope. Snapshot presence and caller context also do not prove current authorization after another device's logout; immediate cross-device revocation requires a separate security contract. See [backends.md](backends.md).

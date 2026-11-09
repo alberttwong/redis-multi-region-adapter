@@ -1,35 +1,24 @@
-# Plan: read-your-own-writes adapter
+# Plan: multi-region session adapter
 
-Date: 2026-11-09
+Date: 2026-11-09. Status: proposed implementation plan for the agreed RYOW target.
 
-Status: RYOW target selected; implementation plan proposed
+## Starting point and dependencies
 
-Inputs: [intent.md](intent.md), [spec.md](spec.md)
+The repository has design documents only. Language, client, middleware, provisioning, and CI are unselected. The paths below are logical proposals; add file extensions and executable commands once the stack is chosen. Resolve blockers in [sources.md](sources.md), especially lineage sequencing, successor proof, context transport, and durability.
 
-## Baseline
+## Order of work
 
-The repository contains documentation only. Language, client, CI, provisioning, and executable verification commands remain unresolved. Paths below are proposed logical locations; add extensions once the stack is chosen.
+1. **Finalize the contract.** Review spec.md, choose backend/acknowledgment/recovery combinations, and agree payload size, deadlines, clock-skew policy, context lifetime, retention, and service levels. Do not infer a durable-replay default.
+2. **Provision representative environments.** Add `infra/README.md` and configuration for the pinned Redis Software 8.x builds, three primary shards per regional database, replicas, persistence, and endpoints. Validate V01 for each supported mode.
+3. **Implement common primitives.** Add `src/config/`, `src/clients/`, `src/topology/`, and `src/records/`: validated configuration, pooled connections, immutable full envelopes, identity/digest checks, generation/expiry, and typed outcomes.
+4. **Implement context and lineage.** Add `src/context/` and `src/middleware/`. Prove write serialization and response ordering; implement protected context issuance and authorized device handoff. Cover V02, V06, V08–V10, and V18.
+5. **Implement distribution before claiming regional progress.** Add `src/distribution/` for independent fan-out and next-write refresh. If enabled, add `src/outbox/` and replay-worker deployment with reviewed atomic capture, per-target application, expiry, capacity, and catch-up. Active-Active uses native transport. Cover V21–V23.
+6. **Implement read policies.** Add `src/strategies/read-your-own-writes/`: default candidate selection/proof, exact reads, any reads, bounded wait loops that recheck eligible successors, cancellation, and snapshot-missing outcomes. Cover the remaining contract cases including V24–V25.
+7. **Verify and measure.** Add `tests/contracts/`, `tests/integration/`, `tests/faults/`, and `benchmarks/`. Run each applicable scenario on real instances of every supported configuration. Publish sanitized evidence and numeric performance results, with a single verification entry point and CI.
+8. **Rehearse operations.** Replace proposed procedures in operations.md with actual staging-tested commands; update CLAUDE.md. Validate restore, partial-outcome reconciliation, topology changes, and rollback without weakening RYOW.
 
-## Sequence
+## Risks and completion
 
-| Step | Work and proposed files | Proof |
-| --- | --- | --- |
-| 1 | Resolve SDK language, context transport/security, token size, retention, local durability, local hint publication/generation rules, descendant/incorporation proof, and freshness deadlines in spec.md and sources.md | Reviewed RYOW contract and bounded scope |
-| 2 | Add `infra/README.md` and provisioning configuration for each pinned Redis Software 8.x backend mode, three primary shards per regional instance, replicas, and persistence | V01 deployed configuration readback |
-| 3 | Add `src/config/`, `src/clients/`, `src/records/`, and `src/topology/` | Envelope/configuration tests; pooled clients; exact-ID lookup |
-| 4 | Add `src/context/` and `src/middleware/` for protected context issuance, cross-device handoff, propagation, and caller sequencing | V02, V06, V08, V09 |
-| 5 | Add `src/strategies/read-your-own-writes/` for required exact-snapshot checks, bounded waiting, explicit freshness errors, default latest-local candidate validation, and opt-in any-version local hint reads | V03–V05, V07, V10 |
-| 6 | Add `tests/contracts/`, `tests/integration/`, and `tests/faults/` using real instances of each configured backend mode | V01–V14 and V16–V20 with reproducible delays, response loss, expiry, and restore |
-| 6a | For independent mode, add `src/distribution/` with request-only behavior and optional `src/outbox/`/replay worker deployment; specify capture atomicity, per-target idempotency, hints, expiry, and target epochs in backends.md | V21–V23 and the common read-contract scenarios |
-| 7 | Add `benchmarks/` and a single verification entry point; wire CI | V15 measured results against accepted targets |
-| 8 | Update operations.md and CLAUDE.md with actual run/recovery commands and staging evidence | Rollout and rollback rehearsal |
+Highest risks are lost/rolled-back context, falsely claiming a successor relationship, missing durable capture when replay is enabled, and treating a later write as delivery of an older exact snapshot. None is solved by three shards or an eventually replicated hint.
 
-## Risks
-
-Lost context can silently destroy RYOW if middleware treats it as an ordinary eventual read. Concurrent requests can overwrite a caller's newer context with an older response. Expiry, eviction, and data loss can make the required snapshot unavailable. Active-Active local conditional writes do not provide global idempotency for arbitrary mutations. Use immutable, uniquely identified snapshots and constrain retry routing.
-
-The current proposal waits at the selected endpoint and returns a freshness error at deadline. Remote fallback, global latest-state discovery, global conflict ordering, and strict S1 authority remain excluded. Optional independent all-target placement acknowledgment is now in scope.
-
-## Verification
-
-Use [validation.md](validation.md). A single-node substitute cannot certify Active-Active behavior. Preserve sanitized operation histories, topology, fault schedule, product build, and outcomes. Keep plan.md and spec.md synchronized with implementation deviations. Application tests and infrastructure provisioning are outside this documentation change. Record the actual documentation validation and submission evidence in the PR.
+No automatic remote read fallback, global latest discovery, strict authority, or cross-session transaction is planned. Keep this plan and the specification synchronized when scope changes. Completion needs applicable scenario evidence and accepted service levels, not merely a clean build. Documentation checks in the PR do not constitute application or infrastructure validation.

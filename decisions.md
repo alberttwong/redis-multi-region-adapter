@@ -96,6 +96,104 @@ flowchart TD
 
 An unknown explicit policy is rejected rather than defaulted. A request carrying no context because expected context was lost is also rejected; the first-read leaf is not a silent downgrade path. Explicit expiry uses the separate expired outcome. A higher numeric label alone is not successor proof.
 
+## Estimating p99 for each preset
+
+Use the [p99 estimation model](latency.md) to turn a selected configuration into a client-visible latency estimate. A/B acknowledge the origin path, C additionally requires recoverable capture, and D/E wait for the slowest required remote verification path. These are critical-path descriptions, not measured latency rankings.
+
+Read p99 also depends on policy and context: any/latest-without-context are local candidate paths, while protected latest/required can include residual propagation and polling waits. Request-only misses may wait for a future same-session write; exact missing history may never arrive. Always report timeout/error/missing rates beside p99 and avoid adding component p99 values or averaging regional p99s.
+
+No millisecond values are estimated yet: regional client-side latency distributions, workload/load, capture design, persistence, arrival timing, and deadlines are still needed. See latency.md for formulas, assumptions, the all-target tail effect, and the measurement workflow.
+
+## Example code: configuration, writes, and reads
+
+These TypeScript snippets illustrate the **proposed API**. No SDK, `createSessionStore` implementation, import package, or executable example exists yet. Endpoint values and authenticated context transport come from deployment/middleware integration. Provision Redis Software 8.x with three primary data shards per regional database; shard count is not an adapter setting.
+
+### Configure independent fan-out: preset B
+
+```ts
+const targets = {
+  "us-east-1": regionAEndpoint,
+  "us-west-2": regionBEndpoint,
+};
+
+const configuration = {
+  distribution: "independent",
+  acknowledgment: "local",
+  recovery: "request-only",
+  readPolicy: "latest", // Store default: latest local + RYOW.
+  targets,
+};
+
+const sessionsInRegionA = createSessionStore({
+  ...configuration,
+  localRegion: "us-east-1",
+});
+
+const sessionsInRegionB = createSessionStore({
+  ...configuration,
+  localRegion: "us-west-2",
+});
+```
+
+This selects **preset B**. To select C, change `recovery` to `"durable-replay"`; select D by changing `acknowledgment` to `"all-targets"`; select E by changing both. Replay needs validated capture/worker configuration in addition to these illustrative fields. Active-Active preset A instead uses `distribution: "active-active"` and `acknowledgment: "local"`, omits application `recovery`, and requires provisioned Active-Active participants; it is not obtained by changing just the distribution field in the independent example.
+
+### Write and read on Device A
+
+```ts
+const sessionId = "session-123";
+const operationId = crypto.randomUUID(); // Create once; reuse on retry.
+
+const write = await sessionsInRegionA.put(
+  sessionId,
+  { selectedProfile: "kids" },
+  operationId,
+);
+
+// Middleware saves the successful write context for dependent reads.
+const current = await sessionsInRegionA.get(sessionId, {
+  context: write.context,
+});
+// Omitted policy uses the configured "latest" default.
+// Return the written version or a proven local successor;
+// otherwise wait within the deadline, then report "snapshot missing".
+```
+
+The server issues the actual immutable version identity; 42 in the diagrams is an explanatory label. Do not manufacture context or assume a UUID sorts versions. Partial/uncertain write results do not issue normal successful-write context. Subsequent writes in a lineage carry the middleware's current context through the proposed fourth `put` argument.
+
+### Device B: choose a read policy
+
+`readPolicy` configures the store default; per-call `policy` overrides it. The context below is supplied by authenticated middleware, not copied across caller boundaries without authorization.
+
+```ts
+// Genuine first read with no prior-write requirement:
+// default latest can return older local state or null.
+await sessionsInRegionB.get(sessionId);
+
+// An authorized handoff supplied transferredContext for A's version.
+// Latest: return that version or a proven local successor.
+await sessionsInRegionB.get(sessionId, {
+  policy: "latest",
+  context: transferredContext,
+});
+
+// Required: return exactly the identity in the context.
+// A newer version cannot substitute for a missing exact version.
+await sessionsInRegionB.get(sessionId, {
+  policy: "required",
+  context: transferredContext,
+});
+
+// Any: return any valid local candidate, including older state, or null.
+// No freshness wait; do not replace the protected context with this result.
+await sessionsInRegionB.get(sessionId, {
+  policy: "any",
+});
+```
+
+For protected `latest` and `required` reads, unavailable expected data is reported as **snapshot missing** after bounded waiting. Default latest rechecks eligible successors while waiting; required checks only the exact identity. Infrastructure, integrity, expiry, and context errors remain distinct. Omitting context because required middleware state was lost is not a valid first read or an automatic downgrade.
+
+In request-only mode, the next same-session insert/update distributes **only its latest version** to the configured targets; earlier versions need not be resent. Strict geographic/global latest and a general at-least-version policy are outside this proposed API.
+
 ## Benefits and costs of read policies
 
 ```mermaid

@@ -1,39 +1,37 @@
 # Multi-region session consistency
 
-Design artifacts for **read-your-own-writes (RYOW)** on **Redis Software 8.x, with three primary data shards per regional database**. Choose Active-Active or independent regional databases with adapter-managed fan-out. Replica shards are additional; confirm that sizing interpretation before provisioning.
+Design for **latest local with read-your-own-writes**, named `latest-local-ryow`, on **Redis Software 8.x**. Each regional database has **three primary data shards**, with replica shards additional. The per-region interpretation remains a sizing assumption to confirm.
 
-A caller that carries the context from an acknowledged write must be able to read that state after moving regions. The default is latest known locally while honoring the caller’s last acknowledged write. The adapter returns an eligible local snapshot, retrieves/waits for the required snapshot, or returns an explicit freshness error. It never reports success with older state or an ordinary propagation-related miss.
+## Consistency
 
-Device B defaults to **latest local + RYOW**, and can explicitly choose **required version** (exactly 42, wait/error) or **any version** (local available state, possibly older, or `null`). Required reads need authenticated version context transferred to Device B. Any-version reads are explicit eventual reads; they never silently replace a required read.
+The default is **latest local + RYOW**: return locally known state that honors the caller's last acknowledged write, or report **snapshot missing** after bounded waiting. The requirement follows authenticated caller context; other devices can still see older local state. Explicit reads can request one exact version or accept any valid local version. This does not provide strict geographic or global consistency. See [consistency.md](consistency.md).
 
-## Documents
+## Start here
 
-| File | Purpose |
-| --- | --- |
-| [decisions.md](decisions.md) | Configuration, recovery, version 42, and read-policy diagrams |
-| [backends.md](backends.md) | Active-Active versus independent databases, fan-out, and acknowledgment policies |
-| [consistency.md](consistency.md) | Consistency levels, default policy, and Device A/B examples |
-| [intent.md](intent.md) | Desired outcome and boundaries |
-| [spec.md](spec.md) | RYOW contract, context propagation, and adapter design |
-| [plan.md](plan.md) | Proposed implementation sequence and proof |
-| [validation.md](validation.md) | Acceptance scenarios |
-| [operations.md](operations.md) | Recovery, rollout, and observability |
-| [REVIEW.md](REVIEW.md) | Review priorities |
-| [CLAUDE.md](CLAUDE.md) | Repository instructions |
-| [sources.md](sources.md) | Source precedence and decisions |
+Read [intent.md](intent.md) for the goal, [consistency.md](consistency.md) for the guarantees and examples, and [decisions.md](decisions.md) for configuration diagrams and option tradeoffs. [spec.md](spec.md) is the authoritative behavior contract.
 
-## Selected scope
+Deployment has three separate choices:
 
-Active-Active mode uses Redis-managed replication. Independent mode uses adapter-managed fan-out with optional durable replay; it may optionally wait for all target copies. The adapter supplies caller context, exact-snapshot validation, and bounded freshness waits. No home cluster, geographic write barrier, or strict commit authority is required for this phase. Other callers' updates and immediate global revocation are outside the RYOW guarantee.
+- **Distribution:** Redis Active-Active, or independent regional databases with adapter fan-out.
+- **Acknowledgment:** local by default; independent mode can explicitly wait for all configured targets.
+- **Recovery in independent mode:** request-only next-write refresh, or optional durable replay.
 
-The proposal uses immutable snapshots and a caller-carried snapshot identity, avoiding a global revision counter. Application middleware carries this context; business code does not poll Redis or compare versions. Without context, exact-ID lookup remains eventual and cannot claim cross-region RYOW.
+Without durable replay, the next insert/update for the same session sends its new complete snapshot to all configured regions again. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
-## Agreed Device A/B behavior
+Read policies are `latest` by default, explicit `required` for one exact version, and explicit `any` for any valid local candidate. None promises the latest completed update across all devices or regions.
 
-A writes 42 in Region A, then reads with context: return 42 or a proven successor. B reads Region B without that context: local 41 or `null` is allowed until propagation arrives. B with transferred context waits for the required state or gets a freshness error. Strict geographic would prohibit B's stale success even without context, for reads beginning after A's completed write within the group. See [consistency.md](consistency.md).
+## Supporting documents
+
+- [backends.md](backends.md): distribution, acknowledgment, and recovery obligations.
+- [validation.md](validation.md): requirements mapped to proposed acceptance scenarios.
+- [plan.md](plan.md): implementation order, proposed paths, and completion evidence.
+- [operations.md](operations.md): deployment, failure handling, and monitoring.
+- [REVIEW.md](REVIEW.md): review priorities and severity.
+- [CLAUDE.md](CLAUDE.md): concise implementation-session context.
+- [sources.md](sources.md): provenance, selected decisions, assumptions, and open questions.
 
 ## Status
 
-Updated 2026-11-09: the repository owner selected RYOW. Detailed design, tooling, retention, durability, and service levels remain drafts. This repository contains documentation only; no SDK, tests, infrastructure, or enforcement hooks have been implemented.
+Design documents only, updated 2026-11-09. No adapter, worker, infrastructure, application tests, or enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
 
-The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the proposed design source of truth; the source deck is provenance.
+The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

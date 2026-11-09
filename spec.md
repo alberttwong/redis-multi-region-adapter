@@ -35,19 +35,13 @@ For cross-device required reads, an authenticated handoff must issue context usa
 
 An application may deliberately choose `any` for a separate request after a required-read failure, but the adapter never makes that downgrade itself. An `any` read does not replace or reduce the caller's protected context. A deliberately requested historical exact read likewise does not reduce the context used for subsequent default latest reads. Return actual snapshot identity/generation and effective read policy alongside a successful payload so applications can distinguish the outcome without implementing freshness checks.
 
-## Agreed scenario and strict geographic comparison
+## Scope and terminology
 
-Assume A's write of 42 has completed before either read begins, B's region still has 41 or no record, and both regions belong to the same geographic group for the strict comparison. Both devices use the default `latest` policy.
+A **snapshot** is a complete immutable session state. Its identity includes session generation and a unique record ID. Numbers such as 42 and 43 are explanatory labels, not a global Redis revision counter.
 
-| Read | Selected design: latest local + RYOW | Strict geographic alternative |
-| --- | --- | --- |
-| Device A reads Region A with write context | Return 42 or a proven local successor; otherwise fail explicitly | Reflect 42 or a later committed update, or fail |
-| Device B reads Region B without context for 42 | Local 41 or `null` is permitted; after replication, 42 can become the local candidate | Must reflect 42 or a later committed update; stale success and an absent result caused solely by propagation lag are forbidden |
-| Device B reads Region B with authenticated context for 42 | Return 42 or a proven local successor; wait locally if needed, then return freshness error at deadline | Same minimum completed-write obligation applies regardless of caller context |
+A **lineage** is a serialized chain of writes. A **proven successor** has authenticated history showing it follows the required write in that lineage. It need not preserve every old field value: a later intentional update may change state. Independent device lineages are incomparable unless an accepted transfer/merge protocol proves otherwise.
 
-The selected guarantee follows caller context. Strict geographic establishes one per-session linearizable history for all callers in the group, so B does not need A's token to observe a completed update. It requires a shared ordering and safe-read/recovery protocol beyond replication and adapter polling. A geographic write-copy barrier alone is insufficient. Regions in different geographic groups would need a separately defined cross-group guarantee; strict geographic alone does not make foreign projections current.
-
-The user agreed to this scenario. Device B does not automatically inherit Device A's context. Default local reads can therefore remain stale for other devices; this is accepted behavior, not an implementation defect. Immediate cross-device revocation is not supplied by the selected guarantee.
+A **target** is a regional database in the captured fan-out configuration, not a primary shard, local HA replica, or application cell. A **protected read** carries a prior-write or exact-version requirement. See [consistency.md](consistency.md) for the agreed A/B scenario and strict geographic comparison.
 
 ## Redis deployment
 
@@ -57,7 +51,19 @@ Pin the product build, database compatibility version, client, supported command
 
 Active-Active supplies CRDT replication and eventual convergence; see the [product overview](https://redis.io/docs/latest/operate/rs/databases/active-active/). Optional [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) preserves causal ordering but does not prove the destination already has a caller's snapshot. The adapter's exact-record check provides that evidence. Neither three shards nor causal configuration replaces context propagation.
 
-See [backends.md](backends.md) for the independent mode: adapter-managed idempotent fan-out to all configured regions, optional recoverable origin capture/replay, and optional `all-targets` acknowledgment. Select recovery explicitly as `request-only` or `durable-replay`; acknowledgment is separately `local` or `all-targets`. See [decisions.md](decisions.md). Request-only has no automatic crash-surviving repair or eventual-delivery promise; Active-Active continues to write once using Redis-managed transport. Both use the same read policies. Required transport/capture capabilities must be validated before a mode can be enabled; a polling adapter alone does not replicate independent databases.
+## Configuration and mode validation
+
+Keep the following choices separate. These are proposed configuration concepts, not a shipping SDK schema:
+
+- `distribution`: `active-active` or `independent`.
+- `acknowledgment`: `local` baseline, or explicit `all-targets` for independent mode.
+- `recovery`: explicitly `request-only` or `durable-replay` for independent mode; application recovery is not applicable to native Active-Active transport.
+- `readPolicy`: `latest` by default, explicit `required` or `any` per operation.
+- Local endpoint, geographic labels, target list/configuration epoch, and bounded write/read/retry deadlines.
+
+Reject unknown or unsupported combinations before serving requests. Independent mode needs a nonempty authoritative target set including the origin. Replay-enabled mode requires a validated capture/worker configuration; request-only does not require a worker. Active-Active uses origin writes and native transport; all-target adapter verification for that mode is not specified in this phase. All-target success verifies the exact captured set and never silently shrinks it.
+
+The target is local RYOW regardless of transport. Independent request-only refreshes on the next same-session insert/update; replay optionally preserves historical delivery obligations. [backends.md](backends.md) owns the detailed distribution protocol and [decisions.md](decisions.md) diagrams the options.
 
 ## Requirements
 
@@ -66,21 +72,21 @@ See [backends.md](backends.md) for the independent mode: adapter-managed idempot
 | R01 | Deploy the selected Redis Software 8.x distribution mode with three primary data shards per regional database | V01 |
 | R02 | Bind immutable snapshot identity, payload, generation, and expiry; reject conflicting reuse | V02, V06 |
 | R03 | Carry protected write context through middleware across all region changes | V03, V08 |
-| R04 | Default to latest-local subject to RYOW; return exact snapshot when explicitly required; never accept older state on a protected read | V03, V05, V19 |
+| R04 | Default to latest-local subject to RYOW; recheck successors while waiting; exact reads never substitute another version | V03, V05, V19, V24 |
 | R05 | Bound local freshness waits; unavailable expected records yield typed errors | V04, V05, V07 |
 | R06 | Preserve operation/record identity on uncertain-write reconciliation | V06 |
 | R07 | Serialize writes per caller lineage and prevent response/context rollback | V09 |
 | R08 | Reject missing, forged, wrong-session, or unsupported required context | V08 |
 | R09 | Distinguish ordinary absence, explicit expiry, freshness failure, and infrastructure errors | V04, V10 |
-| R10 | Preserve context through endpoint changes and validate exact snapshots after restore | V11, V12 |
+| R10 | Preserve context through endpoint changes and validate readiness/state after restore or target admission | V11, V12, V26 |
 | R11 | Define persistence, retention, context lifetime, and retry horizon together | V10, V12 |
 | R12 | Bound resource use, distribute sessions over shards, and sanitize telemetry | V13, V15 |
 | R13 | State cross-caller and revocation limitations explicitly | V14 |
 | R14 | Support default latest-local and explicit required/any policies without implicit downgrade or context rollback | V16, V17, V19 |
 | R15 | Transfer required-version context to authorized Device B through authenticated handoff | V18 |
 | R16 | Preserve the agreed A-local/B-local behavior and distinguish it from strict geographic consistency | V20 |
-| R17 | Independent mode supports explicit request-only or durable-replay recovery; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
-| R18 | Distinguish local acceptance from optional all-target placement acknowledgment; preserve captured targets on timeout | V22 |
+| R17 | Independent mode supports explicit request-only or durable-replay recovery; next insert/update repeats complete-snapshot fan-out when replay is off; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
+| R18 | Validate policy combinations; distinguish local acceptance from all-target placement acknowledgment; preserve targets on timeout | V22, V25 |
 
 ## Proposed adapter API
 
@@ -116,18 +122,18 @@ This is an additional proposed schema, not an existing Redis freshness capabilit
 
 1. Middleware defaults an omitted policy to `latest` and attaches any stored prior-write context. A malformed context or an expected context that was lost is an error; an authenticated first read with genuinely no prior context may use eventual local discovery.
 2. Read the local candidate envelope. With no prior-write requirement, return that valid candidate or `null` if absent/expired; this cannot discover another device's unpropagated update.
-3. With context for 42, return candidate 42, or candidate 43 only with verified evidence that it incorporates 42. In the initial proposal, that evidence is the same protected lineage/generation plus a greater sequence issued under the accepted single-writer sequencing mechanism. Each later lineage write must be based on its predecessor, not an unrelated payload. Numeric version comparison, Redis last-write-wins, or publication time alone is insufficient.
-4. If the candidate is older, missing, or belongs to an incomparable concurrent lineage, look up exact 42 and wait within the deadline if necessary. Returning 42 here honors RYOW, even if an incomparable local candidate exists. Do not imply a total newest-version order across devices.
-5. A missing/integrity-invalid required snapshot yields a typed failure, never an older successful result. A proven descendant returned by `latest` advances protected caller context without permitting rollback. Explicit `any` and historical exact reads do not reduce that context.
+3. With context for 42, return candidate 42, or candidate 43 only with verified evidence that it incorporates 42. In the initial proposal, that evidence is the same protected lineage/generation plus a greater sequence issued under the accepted single-writer sequencing mechanism. Each later lineage write must represent the next full state after its predecessor. Later updates may intentionally overwrite old values; the history proof establishes ordering, not bitwise payload inclusion. Numeric version comparison, Redis last-write-wins, or publication time alone is insufficient.
+4. If the candidate is older, missing, or belongs to an incomparable concurrent lineage, look up exact 42. While waiting within the deadline, recheck both the local candidate and exact 42; a newly arrived proven successor can complete a default latest read even if 42 remains missing. Returning 42 here honors RYOW, even if an incomparable local candidate exists. Do not imply a total newest-version order across devices.
+5. If neither the required snapshot nor a proven successor becomes available by the deadline, report snapshot missing. Integrity-invalid records produce an integrity error, never an older successful result. A proven descendant returned by `latest` advances protected caller context without permitting rollback. Explicit `any` and historical exact reads do not reduce that context.
 
 “Latest locally known” therefore means the discovered eligible local candidate under this rule, not a scan or globally ordered maximum of every stored snapshot. Concurrent lineages have no total ordering in this design. A future merge protocol may admit candidates from other lineages only with a proven incorporates relationship. Verifying sequencing/provenance is an open detailed-design requirement; no native Redis revision ordering is assumed.
 
 ## Write and retry path
 
 1. Serialize writes in one caller lineage. Create one operation ID and uniquely generated snapshot identity; retain them for retries.
-2. Validate caller context and allocate its next lineage sequence in the middleware's sequencing mechanism. The mechanism is a detailed-design decision, not a global session authority.
+2. Validate caller context and construct the complete next session state under the accepted lineage protocol, then allocate its next sequence. Do not derive a successor from stale state that omits the required predecessor. If predecessor-dependent update construction is impossible locally, fail explicitly rather than inventing a proof. The sequencing mechanism is a detailed-design decision, not a global session authority.
 3. Write the immutable envelope at the selected origin using verified backend-supported commands. In independent mode with durable replay enabled, bind the recoverable fan-out obligation to origin acceptance; deliver copies using the same ID and payload.
-4. Establish origin acceptance under the agreed local durability policy, then issue protected context together with the success response. No remote acknowledgment is required by the default policy. Optional independent `all-targets` acknowledgment additionally verifies every captured participant before success.
+4. Establish origin acceptance under the agreed local durability policy. For replay-enabled independent mode, also establish recoverable obligation capture before success. Issue protected context only when the configured acknowledgment condition is satisfied. No remote acknowledgment is required by the default policy. Optional independent `all-targets` acknowledgment additionally verifies every captured participant before success.
 5. Persist the new context before issuing a dependent read; reject older responses that try to replace it.
 
 An ambiguous timeout is not success or proof of rollback. Reconcile the same snapshot at the same origin using the same IDs. Do not blindly rerun a non-idempotent business operation elsewhere. If origin status cannot be established, return an uncertain-outcome error. No arbitrary-mutation exactly-once guarantee is claimed. Global identity uniqueness relies on generated IDs and disciplined retries; a local conditional command cannot detect simultaneous same-ID writes at every Active-Active instance. Conflicting identity/content reuse must be rejected or surfaced as an integrity failure, never silently accepted as matching state.
@@ -140,7 +146,7 @@ Middleware must define sequencing for shared contexts. The initial proposal perm
 2. Select the requesting region's eligible endpoint and look up the exact snapshot key.
 3. On a matching envelope and digest, return its payload. An older mutable session value is never a substitute.
 4. On absence, poll with bounded backoff/jitter until the read deadline. Mismatched identity/digest is an integrity error rather than successful data.
-5. At deadline, return `FreshnessUnavailable`. Connectivity/authentication failures remain distinct infrastructure errors. Do not return `null` for an expected unexpired snapshot and do not automatically fetch remotely.
+5. At deadline, return `FreshnessUnavailable` with reason `snapshot_missing` and the plain-language description “snapshot missing.” Connectivity/authentication failures remain distinct infrastructure errors. Do not return `null` for an expected unexpired snapshot and do not automatically fetch remotely.
 
 A request can explicitly use the `any` policy or `getRecord`. The latter returns `null` on a genuine endpoint miss. Both have eventual semantics; `any` discovers a session candidate, whereas `getRecord` looks up a supplied exact identity. Context must not be silently discarded to obtain availability.
 
@@ -148,12 +154,24 @@ Expiry is decided from validated server-controlled absolute expiry with an agree
 
 ## Retention and recovery
 
-Retain snapshots for the accepted context-validity and retry horizons plus a safety margin. Define Redis expiry behavior, persistence, backup, and restore procedures for the exact deployment. If acknowledged data is lost or evicted before expiry, fail protected reads explicitly; do not fabricate the required state. Healthy endpoint connectivity does not prove freshness.
+Retain origin snapshots for the accepted context-validity and retry horizons plus a safety margin. Destination retention governs delivered copies; request-only mode need not deliver every historical snapshot. Define Redis expiry behavior, persistence, backup, and restore procedures for the exact deployment. If acknowledged data is lost or evicted before expiry, fail protected reads explicitly; do not fabricate the required state. Healthy endpoint connectivity does not prove freshness.
 
-Refresh endpoints without losing context or operation identity. Restored/joining participants undergo supported product catch-up and readiness checks, with snapshot identity and caller-context verification on every protected read. Default local acknowledgment requires no all-member commit protocol. Optional all-target placement acknowledgment captures an authoritative target set/configuration epoch without providing strict commit ordering.
+Refresh endpoints without losing context or operation identity. Restored/joining participants follow their backend-specific readiness/catch-up rules in backends.md; request-only admission does not promise historical backfill, with snapshot identity and caller-context verification on every protected read. Default local acknowledgment requires no all-member commit protocol. Optional all-target placement acknowledgment captures an authoritative target set/configuration epoch without providing strict commit ordering.
 
-## Deferred guarantees and concerns
+## Outcomes and missing-snapshot wording
 
-L1 from the deck allows propagation misses and therefore does not alone satisfy this protected-read contract. S1's strict commit authority is deferred. Independent mode now offers optional all-target placement acknowledgment, related to the earlier L2 barrier; it does not select strict consistency. Native replication dependency tokens are not assumed. `WAIT` is not an Active-Active cross-region freshness barrier; see the [command reference](https://redis.io/docs/latest/commands/wait/).
+Successful reads return payload, actual snapshot identity/generation, and effective policy. A default proven-successor result can advance context safely; explicit any or historical exact reads do not reduce the protected floor. Successful writes return snapshot identity and updated context only after the configured acknowledgment condition.
 
-Before implementation, resolve language/client, sequencing and context transport, collision/retry details, supported command matrix, persistence, retention, expiry/skew, deadlines, token size, and security ownership. RYOW was selected by the user on 2026-11-09; no unresolved strict authority choice blocks this phase.
+- **Snapshot missing:** expected unexpired state cannot be found locally within the deadline. Return `FreshnessUnavailable` with reason `snapshot_missing` and description “snapshot missing.” This reports current absence without asserting whether it arrived previously.
+- **Ordinary absence:** an unprotected local lookup has no valid candidate; null is permitted.
+- **Expired:** validated server-controlled expiry has passed under the agreed skew policy. A Redis miss alone does not establish expiry.
+- **Context/integrity/infrastructure error:** reject invalid context, corrupt identity/content, or connectivity/authentication failure distinctly; none becomes null or a missing snapshot.
+- **Partial/uncertain write:** some effects may exist but configured success cannot be confirmed. Preserve original IDs and targets for reconciliation. Do not issue normal successful-write context or imply rollback.
+
+A next insert/update sends its own new complete snapshot. It may refresh current state without restoring exact historical 42. Default latest can use 43 only with verified successor evidence; exact 42 remains missing. No automatic remote read fallback or downgrade changes these outcomes.
+
+## Open implementation decisions
+
+Language/client, context transport and sequencing, successor proof, collision handling, exact backend commands, capture/worker design when replay is selected, target epoch storage, expiry/skew, retention, payload/token limits, and numeric service levels remain unresolved. They are explicit review gates in [sources.md](sources.md), not completed algorithms.
+
+Strict geographic/global authority and native dependency-token support are not assumed. `WAIT` does not provide an Active-Active regional barrier; see the [command reference](https://redis.io/docs/latest/commands/wait/). L1/L2/S1 in the source deck are historical architecture labels, not read-policy names. Optional all-target placement relates to the former L2 barrier and does not select strict consistency.

@@ -1,23 +1,18 @@
 # Review guidance
 
-Review [intent.md](intent.md), [spec.md](spec.md), [plan.md](plan.md), and [validation.md](validation.md).
+Use [spec.md](spec.md) as the behavior contract, [plan.md](plan.md) for scope, and [validation.md](validation.md) for proof. Review the configured backend, acknowledgment, recovery, and read policies together.
 
-## Passes
+## Review passes
 
-1. RYOW correctness: trace write acknowledgment through context issuance, middleware propagation, destination read, snapshot validation, and deadline failure. Check both stale hits and misses.
-2. Caller lifecycle: check response reordering, concurrent writes, retries after response loss, lost/forged context, generation changes, and expiry.
-3. Security and operations: check token binding, authorization boundaries, logging, pooled clients, topology refresh, restore, and the exact Redis Software 8.x Active-Active three-primary-shard configuration.
+1. **Read correctness:** validate context, candidate/successor proof, exact lookup, bounded waiting, and outcome classification. Default latest must recheck candidates while waiting; exact reads never substitute a successor. No stale success, implicit downgrade, or missing-context bypass.
+2. **Write lifecycle:** inspect full-snapshot construction, single-lineage sequencing, response reordering, idempotent retries, partial outcomes, and identity/content collisions. A next write is not a retroactive acknowledgment of an uncertain prior write.
+3. **Distribution and recovery:** Active-Active writes once. Independent fan-out copies the same immutable envelope, not a repeated business mutation. Request-only refreshes on the next same-session insert/update. Enabled durable replay requires recoverable capture, expiry-safe delivery, no loops, retention, backpressure, and catch-up. All-target success verifies every captured member without timeout-driven shrinkage.
+4. **Security and operations:** verify token/caller binding, authorized cross-device transfer, generation/expiry handling, exact backend compatibility, three primary shards per database, pooling, restore, and sanitized telemetry. Require integration evidence for each supported backend/recovery combination; request-only does not require a worker.
 
-Reject successful protected reads that return older state, convert an expected unexpired record's absence into `null`, or drop context and silently use eventual reads. Require evidence from real Active-Active instances. Do not claim global idempotency from a local conditional command or latest-state/revocation protection from RYOW.
+The agreed scenario permits B without A's context to read 41/null while A's 42 is unpropagated. That is not a RYOW defect. Neither a local hint, fan-out barrier, nor snapshot hit proves global latest state or current revocation. Describe an absent expected snapshot as **snapshot missing**, not as an infrastructure failure.
 
-Review all three policies. Default `latest` requires local candidate plus verified incorporation of caller context, falling back to the required snapshot or error. Test omitted-policy behavior and incomparable concurrent lineages. Explicit policies: `required` must return the exact requested identity, while `any` may return older/newer local state or `null`. Check actual-version metadata, hint integrity/expiry and generation handling, authenticated Device B handoff, and protected-context preservation. No automatic timeout fallback or globally ordered revision inference is allowed.
+## Findings
 
-Check the agreed A/B scenario: A's context protects A's subsequent local read; B without transferred context may read 41 or `null` while 42 is propagating. Do not flag that accepted stale read as a RYOW defect or describe it as strict geographic consistency. B with transferred context must satisfy the carried requirement or fail explicitly.
+Critical findings expose secrets, cross caller/security boundaries, or bypass a separately required authorization policy. Important findings violate a reproducible read/write/distribution contract, permit context rollback, create unbounded waits, or make false durability claims. Minor findings concern clarity or maintainability without a behavior impact.
 
-For independent mode, review the explicit recovery selection, durable capture before acknowledgment when replay is enabled, duplicate/reordered fan-out, original expiry, hint selection, backlog retention/backpressure, and gap-free catch-up. Optional all-target success must verify every captured target; never claim it creates strict consistency. Active-Active must not duplicate non-idempotent business mutations across instances. Request-only must not claim automatic repair or guaranteed convergence. See backends.md and decisions.md.
-
-## Severity
-
-Critical: credential exposure, forged context crossing caller boundaries, or bypass of a separately required authorization policy. Important: a reproducible RYOW violation, unbounded wait, unsafe retry, context rollback, or false durability claim. Minor: clarity and maintainability without a behavioral impact.
-
-Include trigger, consequence, requirement ID, and evidence for substantive findings. Keep minor findings to three. Distinguish an acknowledged RYOW limitation from a defect; stronger guarantees need a separate design decision. Reviewer findings do not manufacture approval or evidence that checks ran.
+For each substantive finding, give its trigger, consequence, requirement ID, and evidence. Limit minor findings to three. Review findings do not constitute approval, and unconfigured protections must not be described as enforced.

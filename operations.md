@@ -1,43 +1,37 @@
-# Operations: read-your-own-writes
+# Operating the session adapter
 
-Status: proposed procedures; no automation implemented
+Status: proposed operational requirements; no commands, workers, or automation implemented. Use [backends.md](backends.md) for transport mechanics and [validation.md](validation.md) for evidence.
 
-Related: [spec.md](spec.md), [validation.md](validation.md)
+## Record deployment and policy
 
-## Deployment
+For each region, record endpoint, geographic group, Redis Software build, database compatibility version, three primary data shards, replicas, persistence, capacity, eviction, and selected distribution mode. Record Active-Active identity when applicable; independent mode also records acknowledgment, recovery, target set, and configuration epoch. Verify supported commands for each actual backend. Keep credentials outside Git.
 
-Record each regional endpoint, geographic group, distribution mode, Active-Active identity when applicable, Redis Software 8.x build, compatibility version, three primary data shards, replicas, persistence, eviction policy, and capacity. Keep credentials outside Git. Confirm supported commands against the deployed Active-Active configuration.
+Cells and Redis targets change independently. Endpoint refresh must preserve caller context, snapshot/operation IDs, deadlines, and the selected policies. No implicit target removal, recovery change, or read-policy downgrade is permitted.
 
-Redis handles transport in Active-Active mode; independent mode requires fan-out with explicitly selected request-only or durable-replay recovery as described in [backends.md](backends.md). Default acknowledgment does not wait for every target; optional independent `all-targets` acknowledgment does. Cell changes update application endpoint discovery; Redis participant changes follow supported product procedures and readiness checks. Neither change may drop caller context.
+## Handle a missing snapshot
 
-## Freshness and recovery
+Validate context and inspect locally available state. Default `latest` rechecks both eligible successor candidates and the required exact snapshot during its bounded wait; explicit `required` checks only the exact identity. At deadline, an expected unexpired snapshot still unavailable is **snapshot missing** (`FreshnessUnavailable`, reason `snapshot_missing`). Ordinary unprotected absence may return null; explicit expiry, connectivity, authentication, integrity, and context errors remain distinct.
 
-On a protected read, validate context, check the selected endpoint for the exact snapshot, then retry within the configured budget. At deadline, return a typed freshness-unavailable error. Do not return older state, silently fetch remotely, or turn the error into a cache miss. Infrastructure errors remain distinct.
+No remote fetch or old-value fallback occurs automatically. A newer default-read result needs verified history evidence; its numeric label alone is insufficient. Keep genuine first reads without context separate from missing expected context.
 
-After restore, data loss, or eviction, do not infer freshness from endpoint health. The snapshot identity and digest must still match. Disable traffic to known regressed endpoints while recovering; protected requests that cannot find their snapshot fail explicitly. Endpoint changes preserve token and operation identity.
+## Independent distribution
 
-Retain snapshots for at least the accepted context-validity and retry windows, with an agreed safety margin. Server-controlled absolute expiry is bound into context and record. Data disappearing before expiry is unavailability, not evidence that the session expired. Uncertain writes reconcile with the same operation/record identity and origin rather than executing a new mutation in a different region.
+Request-only mode sends the new complete snapshot again on the next insert/update for the same session. It does not retain historical delivery obligations or require manual repair as the normal flow. If 43 arrives while exact 42 never does, default latest may use proven successor 43; exact 42 reports missing. Without another write, a remote region can remain stale.
 
-## Default latest-local reads
+When durable replay is enabled, monitor worker health, per-target backlog, oldest undelivered work, delivery conflicts, expiry, retries, and backpressure. Rehearse atomic-capture failure, request crash, worker restart, duplicate/reordered delivery, and gap-free new-target catch-up. Do not trim work before its retention/delivery contract permits it.
 
-The default `latest` policy reads a local candidate, then verifies it incorporates any carried prior-write requirement. If not, retrieve/wait for the required snapshot; fail at deadline. With no prior-write context, local discovery is eventual. Keep invalid/lost expected context separate from a genuine first read. Record candidate rejection, required-snapshot fallback, and lineage-proof failure independently. Returning a proven descendant advances context under the accepted sequencing mechanism. An incomparable other-device candidate does not bypass the required state.
+All-target timeout is a partial/uncertain result, not rollback. Reconcile the original snapshot/operation and captured target set. A later write does not turn an older uncertain result into success. Enabled replay may complete its copies independently of later requests.
 
-## Any-version reads
+## Expiry, restore, and region changes
 
-An explicit `any` request reads the local available-snapshot hint without a freshness wait. It may return older/newer valid state or `null`; record the effective policy separately from protected freshness outcomes. Hint publication failures, missing hints, expired hints, and hint/payload memory overhead need monitoring. A hint never authorizes access or proves current revocation state. Any-version results never overwrite protected caller context. Rehearse authenticated cross-device required-context handoff during rollout.
+Keep origin snapshots for the accepted context and retry horizons plus a safety margin. Destination retention applies to delivered copies; it does not promise delivery of missing historical snapshots in request-only mode. Bind server-assigned absolute expiry into context and records, with an agreed skew policy. Never reset TTL during replay or interpret an early miss as normal expiry.
 
-## Monitoring
+After restore, eviction, or data regression, validate endpoint readiness and record integrity before restoring protected traffic. Recover retained work where available; missing records remain missing. Active-Active follows supported product catch-up procedures. Independent replay uses baseline plus gap-free replay; request-only targets receive future writes and do not claim historical catch-up. Configuration changes preserve outstanding all-target obligations.
 
-Separate ordinary exact-ID misses, freshness waits, freshness deadline failures, infrastructure errors, context rejection, expired records, and uncertain writes. Measure local hit rate, propagation wait duration, replication lag, retries, pool saturation, and shard memory/traffic skew. Exclude payloads, bearer identifiers, credentials, and raw context from logs.
+## Observe and release
 
-Thresholds, paging ownership, traffic targets, and persistence/RPO/RTO remain open. Select them from representative load and service requirements.
+Measure ordinary misses, snapshot-missing outcomes, freshness waits, candidate rejection, context/proof errors, infrastructure failures, partial writes, fan-out success per target, replay backlog when enabled, pool saturation, and shard skew. Use opaque correlation IDs; exclude payloads, bearer IDs, credentials, and raw tokens. Agree numeric targets and paging ownership before launch.
 
-## Rollout and rollback
+Rehearse each supported combination in staging, then limit initial traffic. Rollback preserves envelope/token compatibility, sequencing, expiry, and the chosen contract. Pause protected operations if an older version cannot honor it. No release gate or permission control is installed by these documents.
 
-Validate cross-region and cross-group movement in staging, then limit initial traffic. Rollback must preserve envelope/context formats, token verification, caller ordering, and the protected-read contract. If an older adapter cannot preserve context, pause protected operations rather than silently switch to eventual reads. No branch protection, release hook, or deployment permission is configured here.
-
-Record incidents with sanitized context, violated requirement, observed topology, mitigation, and uncertainty. Add regression scenarios and propose follow-up work through a new intent. Immediate global revocation requires a separate authorization mechanism and incident procedure.
-
-## Independent fan-out operations
-
-Monitor per-origin backlog, per-target delivery/verification, oldest undelivered record, replay failures, digest conflicts, expiry handling, and backpressure. Rehearse crash-after-capture, partial fan-out, worker restart, duplicate/reordered delivery, gap-free region catch-up, restore, and safe target removal. When replay is enabled, a worker must finish retained obligations after the request process exits. Request-only mode persists no obligation: incomplete copies require caller/operator repair and may otherwise remain absent indefinitely. Do not trim the outbox before the accepted delivery/recovery policy permits it. Preserve captured target membership for all-target retries and report ambiguous outcomes without silent shrinkage.
+An incident record captures the violated requirement, sanitized evidence, policy/topology, mitigation, and uncertainty. Add a regression scenario and propose follow-up intent. Current authorization/revocation remains a separate service/security responsibility.

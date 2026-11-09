@@ -1,50 +1,31 @@
-# Intent: read-your-own-writes across regions
+# Intent: multi-region session consistency
 
-Date: 2026-11-09
+Date: 2026-11-09. Status: consistency target agreed; detailed design proposed.
 
-Status: RYOW target selected by repository owner; detailed design pending review
+## Problem and outcome
 
-Companions: [spec.md](spec.md), [sources.md](sources.md)
+A session request can move regions before its last update has propagated. The destination may hold older state or no record. Provide an in-process adapter that preserves the caller's acknowledged state without business-code polling or version comparisons.
 
-## Problem
+The selected contract is **latest local with read-your-own-writes (RYOW)**. The default read can use a later locally known snapshot only when its history proves it succeeds the caller's write. Otherwise it retrieves the required snapshot or reports it as missing after bounded waiting. Exact-version and any-version reads are explicit options.
 
-A caller updates a session in one region, then moves to another before replication arrives. The destination may have older state or no record. An ordinary eventual read can therefore fail to reflect the caller's acknowledged update.
+## Agreed Device A/B scenario
 
-## Desired outcome
+A writes 42 in Region A and receives context. A's subsequent local read returns 42 or a proven successor. B in Region B without that context may see 41 or `null`. With authenticated context transferred to B, its default read must return 42/a proven successor or a freshness error described as **snapshot missing**.
 
-An in-process adapter preserves read-your-own-writes across cells and regions. An acknowledged write returns both its immutable record identity and context for subsequent reads. Middleware propagates that context so a default read returns an eligible local snapshot that incorporates the caller’s write, the required snapshot itself, or an explicit failure to satisfy freshness within its deadline.
+This is not strict geographic consistency: B without context need not see another device's completed update. The guarantee follows caller context. Detailed examples live in [consistency.md](consistency.md).
 
-This phase chooses RYOW rather than strict geographic consistency. It does not require a read to observe another caller's later update. The default does not require every geographic participant to apply a write before acknowledgment. Independent mode can optionally wait for all configured target copies; this is placement verification, not strict consistency.
+## Platform and delivery choices
 
-## Device B read options
+Use Redis Software 8.x with three primary data shards per regional database, plus separately sized replicas. Offer Active-Active or independent regional databases with adapter-managed fan-out. No fixed session home cluster or request-path session service is required.
 
-Default to latest known locally while honoring the caller’s acknowledged write. With no prior context this is eventual local discovery. Provide an explicit per-request choice: require exact version 42 using authenticated transferred context, or accept any locally available valid version without a required-version guarantee. The any-version policy may return older/newer state or `null`, has no freshness wait, and must not overwrite protected caller context. Required-version timeout remains an error with no automatic downgrade. Exact 42 is distinct from a future “42 or later” policy.
+Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's complete snapshot again; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
 
-## Agreed default scenario
+Reference geography is US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units and do not automatically correspond to Redis databases.
 
-After A writes 42 in Region A, A's local read carries its context and returns 42 or a proven successor. B's read in Region B without that context may return local 41 or `null` until replication catches up. If context is transferred to B through authenticated handoff, B waits for 42 or returns a freshness error; default reads can also return a proven local successor. This behavior was explicitly agreed by the user. Unlike strict geographic consistency, the selected design does not automatically protect every device against another device's completed but unpropagated update.
+## Users, constraints, and success
 
-## Platform and users
+Developers integrate the adapter, platform engineers operate transport and databases, and service/security owners set durability, expiry, and authorization policies. Middleware propagates protected context across cells, regions, and authorized device handoffs. There is no automatic remote read fallback or silent downgrade to stale reads.
 
-Offer Redis Software 8.x with either Active-Active or independent regional databases with adapter-managed fan-out, using three primary data shards per regional database; replicas are additional. Developers integrate the adapter, platform engineers operate Redis, and service owners define latency, persistence, expiry, and security requirements.
+Pass the applicable scenarios in [validation.md](validation.md), with measured targets agreed before production acceptance. Distinguish snapshot missing, ordinary eventual absence, explicit expiry, and infrastructure failure. Exclude payloads, credentials, bearer IDs, and raw context from telemetry.
 
-Reference groups are US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units, not automatically Redis participants. Context follows the caller even across geographic groups; replication remains asynchronous.
-
-## Constraints
-
-- No fixed session home cluster. A read waits at its selected endpoint; there is no automatic remote fallback in the initial proposal.
-- No business-code version checks or replication polling.
-- Carry context on every protected read. Missing or invalid required context cannot silently downgrade the operation to eventual consistency.
-- An expected unexpired snapshot that has not arrived produces a freshness error after bounded waiting, not `null`.
-- An unprotected exact-ID miss may return `null`; authoritative expiry of the requested record may also produce an explicit expired/absent result.
-- Session payloads, credentials, bearer IDs, and raw context tokens do not enter telemetry.
-
-## Success
-
-Pass the scenarios in [validation.md](validation.md), including region movement, stale hits, propagation delay, retries, lost context, concurrent callers, and recovery. Agree numeric latency/throughput targets, payload sizes, retention, durability, RPO, and RTO before production acceptance.
-
-## Boundaries and questions
-
-Strict geographic/global ordering, cross-caller latest-state discovery, geographic all-member barriers, and immediate cross-caller revocation are deferred. Applications requiring current authorization need a separate security mechanism; RYOW alone does not provide it.
-
-Resolve SDK language, middleware integration, token protection and storage, snapshot lifetime, ambiguous-write reconciliation, persistence, supported commands, and performance targets during detailed review. The user selected the consistency target; that selection does not imply approval of every proposed implementation detail.
+Strict geographic/global ordering, general cross-device latest-state discovery, cross-session transactions, and immediate cross-device revocation are outside this phase. Authorization requiring those guarantees needs a separate design. Resolve the open decisions in [sources.md](sources.md) before implementation; the user's consistency selection does not approve every proposed mechanism.

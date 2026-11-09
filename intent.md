@@ -10,9 +10,9 @@ The selected contract is **latest local with read-your-own-writes (RYOW)**. The 
 
 ## Agreed regional clients
 
-A1 and A2 both read and write in `us-west-2`. B1 reads/writes in `us-east-1`; C1 reads/writes in `us-east-2`. All clients are independent and do not exchange write context, version IDs, notifications, or shared latest-version metadata. Redis replication or adapter fan-out still transports session data.
+A1 and A2 both read and write in `us-west-2`. B1 reads/writes in `us-east-1`; C1 in `us-east-2`; D1 in `eu-west-1`; E1 in `eu-central-1`. The three US regions form the US group; the two EU regions form the EU group. All clients are independent and do not exchange write context, version IDs, notifications, or shared latest-version metadata. Redis replication or adapter fan-out still transports session data.
 
-A1's acknowledged write of 42 protects A1's own dependent reads. A2 may discover it through the shared regional Redis database after candidate publication, with no WAN hop, but same-region placement does not transfer A1's context or guarantee cross-client latest state. B1/C1 can read older local state or null until data arrives and is selected locally. Each client's own writes establish its separate RYOW requirement.
+A1's acknowledged write of 42 protects A1's own dependent reads. A2 may discover it through the shared regional Redis database after candidate publication, with no WAN hop, but same-region placement does not transfer A1's context or guarantee cross-client latest state. B1/C1/D1/E1 can read older local state or null until data arrives and is selected locally. Each client's own writes establish its separate RYOW requirement.
 
 The example assumes A1/A2 use the same logical regional Redis database; confirm endpoint/cell layout before implementation. Defaults remain latest-local + RYOW with local acknowledgment as baseline and independent recovery explicitly selected. See [consistency.md](consistency.md).
 
@@ -20,7 +20,7 @@ The example assumes A1/A2 use the same logical regional Redis database; confirm 
 
 Use Redis Software 8.x with three primary data shards per regional database, plus separately sized replicas. Offer Active-Active or independent regional databases with adapter-managed fan-out. No fixed session home cluster or request-path session service is required.
 
-Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's latest version; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
+Groups describe geographic membership, not a new consistency default or an implicit acknowledgment barrier. Under local acknowledgment, distribution to the foreign group remains asynchronous. Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's latest version; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
 
 Reference geography is US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units and do not automatically correspond to Redis databases.
 

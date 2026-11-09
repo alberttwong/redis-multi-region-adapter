@@ -108,13 +108,20 @@ No millisecond values are estimated yet: regional client-side latency distributi
 
 These TypeScript snippets illustrate the **proposed API**. No SDK, `createSessionStore` implementation, import package, or executable example exists yet. Endpoint values and authenticated context transport come from deployment/middleware integration. Provision Redis Software 8.x with three primary data shards per regional database; shard count is not an adapter setting.
 
-### Configure four clients across three regions: preset B
+### Configure six clients in US and EU groups: preset B
 
 ```ts
 const targets = {
   "us-west-2": westEndpoint,
   "us-east-1": east1Endpoint,
   "us-east-2": east2Endpoint,
+  "eu-west-1": euWestEndpoint,
+  "eu-central-1": euCentralEndpoint,
+};
+
+const groups = {
+  US: ["us-west-2", "us-east-1", "us-east-2"],
+  EU: ["eu-west-1", "eu-central-1"],
 };
 
 const configuration = {
@@ -123,6 +130,7 @@ const configuration = {
   recovery: "request-only",
   readPolicy: "latest",
   targets,
+  groups, // Topology metadata; does not imply a write barrier.
 };
 
 // A1 and A2 share the west regional database, but not application context.
@@ -130,11 +138,13 @@ const sessionsA1 = createSessionStore({ ...configuration, localRegion: "us-west-
 const sessionsA2 = createSessionStore({ ...configuration, localRegion: "us-west-2" });
 const sessionsB1 = createSessionStore({ ...configuration, localRegion: "us-east-1" });
 const sessionsC1 = createSessionStore({ ...configuration, localRegion: "us-east-2" });
+const sessionsD1 = createSessionStore({ ...configuration, localRegion: "eu-west-1" });
+const sessionsE1 = createSessionStore({ ...configuration, localRegion: "eu-central-1" });
 ```
 
-This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and no application recovery setting.
+This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1/D1/E1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and no application recovery setting.
 
-Three clients' regions mean three regional databases in this example: nine primary shards before replicas. Adding A2 does not add another regional database or three more shards.
+The five regional databases have fifteen primary shards before replicas. A1/A2 share the west regional database, so six clients do not add six regional targets. Baseline local acknowledgment does not wait for either the whole origin group or the foreign group. In this sample, changing acknowledgment to all-targets would verify the five configured targets; a separate origin-group acknowledgment set would need an explicit design choice rather than being inferred from groups.
 
 ### Each client reads its own acknowledged write
 
@@ -166,10 +176,12 @@ The actual version identity is issued by the proposed protocol; 42 is an explana
 // It can discover 42 after local candidate publication, without a WAN wait.
 await sessionsA2.get(sessionId);
 
-// B1 and C1 use their own regional candidates: older state/null is allowed
+// B1/C1 in US and D1/E1 in EU use their own regional candidates: older state/null is allowed
 // while A1's version is still propagating or has not become their candidate.
 await sessionsB1.get(sessionId);
 await sessionsC1.get(sessionId);
+await sessionsD1.get(sessionId);
+await sessionsE1.get(sessionId);
 
 // Explicit any also permits older local state/null without freshness waiting.
 await sessionsB1.get(sessionId, { policy: "any" });
@@ -177,11 +189,12 @@ await sessionsB1.get(sessionId, { policy: "any" });
 
 These no-context calls assume the client has no own protected requirement yet. They do not discard context from that client's previous writes. Same-region placement alone does not prove that A1's best-effort discovery hint was published or establish strict cross-client ordering.
 
-### A2, B1, and C1 can each write and retain separate context
+### Every client can write and retain separate context
 
 ```ts
 const operationIds = {
   a2: crypto.randomUUID(), b1: crypto.randomUUID(), c1: crypto.randomUUID(),
+  d1: crypto.randomUUID(), e1: crypto.randomUUID(),
 }; // Retain these IDs for retries.
 
 const writeA2 = await sessionsA2.put(
@@ -194,10 +207,19 @@ const writeC1 = await sessionsC1.put(
   sessionId, { selectedProfile: "c1-choice" }, operationIds.c1,
 );
 
+const writeD1 = await sessionsD1.put(
+  sessionId, { selectedProfile: "d1-choice" }, operationIds.d1,
+);
+const writeE1 = await sessionsE1.put(
+  sessionId, { selectedProfile: "e1-choice" }, operationIds.e1,
+);
+
 // Each middleware retains only its own client's context.
 await sessionsA2.get(sessionId, { context: writeA2.context });
 await sessionsB1.get(sessionId, { context: writeB1.context });
 await sessionsC1.get(sessionId, { context: writeC1.context });
+await sessionsD1.get(sessionId, { context: writeD1.context });
+await sessionsE1.get(sessionId, { context: writeE1.context });
 ```
 
 Keep each generated operation ID stable when retrying its write; generate a new ID only for a new logical write. The client versions above belong to separate histories, not an automatically ordered global sequence. A1's future reads retain A1's context independently of the other writes.

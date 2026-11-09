@@ -2,7 +2,7 @@
 
 Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices and their benefits/costs. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
 
-A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, and C1 reads/writes `us-east-2`. All retain separate own-write context. A1/A2 share the example west regional database; the two local clients do not add a target or share a lineage. Fan-out targets databases/regions, not clients. It transports session data, not context between clients.
+A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`. US contains the three US regions; EU contains the two EU regions. All retain separate own-write context. A1/A2 share the example west regional database; the two local clients do not add a target or share a lineage. Fan-out targets databases/regions, not clients. It transports session data, not context between clients.
 
 ## Choose distribution
 
@@ -33,7 +33,7 @@ flowchart LR
 
 Local acknowledgment is the baseline. Optional `all-targets` waits for every member captured with the operation's target-set/configuration epoch. A deadline never silently removes a participant. On partial failure, preserve IDs and report an uncertain/partial outcome; existing copies are not rolled back. Readback proves presence under its stated policy, not disk durability. Neither acknowledgment option establishes strict geographic ordering or atomic regional visibility.
 
-Target scope is explicit: US-only verification is not verification of every global region. Active-Active in this phase uses origin acknowledgment; an adapter verification overlay for that backend is not currently specified.
+Target scope is explicit: US-only verification is not verification of every global region. Current local acknowledgment does not wait for group peers or foreign groups. In the five-target sample, all-targets verifies all five; groups do not implicitly reduce this set. A future origin-group-only barrier with foreign asynchronous delivery requires a distinct acknowledgment-set design. Active-Active in this phase uses origin acknowledgment; an adapter verification overlay for that backend is not currently specified.
 
 ## Request-only: refresh on the next write
 

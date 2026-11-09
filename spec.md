@@ -17,11 +17,11 @@ The default read policy is **latest known locally while honoring the caller's la
 Explicit `required` reads request one exact snapshot, even when a newer snapshot exists. Explicit `any` reads permit any valid local candidate without the RYOW freshness constraint. These policies are distinct; exact-version reads do not redefine the default.
 This contract spans same-cell, same-region, cross-region, and US/EU movement. Other callers may have newer snapshots that this caller has not observed. No global latest-state discovery, per-session linearizability, or strict geographic/global commit ordering is promised. All-target placement verification is available only under the explicit independent-backend acknowledgment policy.
 
-The caller lineage is a middleware-managed chain of sequential writes and their following reads, not every device belonging to the same account. A1 and A2 read/write in `us-west-2`, B1 in `us-east-1`, and C1 in `us-east-2`. These are four independent clients; none receives another client’s write context or version IDs through direct or out-of-band application communication. Context follows the same caller across requests/regions; cross-device handoff and shared latest-version discovery are outside scope. Reads issued before a write completes are concurrent and do not yet carry its guarantee.
+The caller lineage is a middleware-managed chain of sequential writes and their following reads, not every device belonging to the same account. A1 and A2 read/write in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`, D1 in `eu-west-1`, and E1 in `eu-central-1`. These are six independent clients; none receives another client’s write context or version IDs through direct or out-of-band application communication. Context follows the same caller across requests/regions; cross-device handoff and shared latest-version discovery are outside scope. Reads issued before a write completes are concurrent and do not yet carry its guarantee.
 
 ## Explicit read policies
 
-The API supports three read policies. Protected policies require known authenticated context. A2, B1, and C1 have no context for A1’s writes; absent their own write requirement, default latest is local discovery and cannot require unknown version 42:
+The API supports three read policies. Protected policies require known authenticated context. A2, B1, C1, D1, and E1 have no context for A1’s writes; absent their own write requirement, default latest is local discovery and cannot require unknown version 42:
 
 | Policy | Request needs | Result at Region B |
 | --- | --- | --- |
@@ -43,9 +43,9 @@ A **lineage** is a serialized chain of writes. A **proven successor** has authen
 
 A **target** is a regional database in the captured fan-out configuration, not a primary shard, local HA replica, or application cell. A **protected read** carries a prior-write or exact-version requirement. See [consistency.md](consistency.md) for the agreed A/B scenario and strict geographic comparison.
 
-The baseline pairs reads/writes locally: A1/A2 in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`. A1/A2 share a logical regional database in the example, with distinct adapter instances and contexts. This is an explicit example-topology assumption, not a claim that every pair of same-region services shares a database.
+The baseline pairs reads/writes locally: A1/A2 in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`, D1 in `eu-west-1`, E1 in `eu-central-1`. A1/A2 share a logical regional database in the example, with distinct adapter instances and contexts. This is an explicit example-topology assumption, not a claim that every pair of same-region services shares a database.
 
-A2 can discover A1’s published local candidate without a WAN replication wait. A1’s origin acknowledgment does not prove successful discovery-hint publication or establish strict ordering across independent callers. Each client still validates its own context when present. This arrangement changes no policy defaults. The three-US-region example has nine primary shards before replicas; the broader five-region US/EU reference below remains configurable.
+A2 can discover A1’s published local candidate without a WAN replication wait. A1’s origin acknowledgment does not prove successful discovery-hint publication or establish strict ordering across independent callers. Each client still validates its own context when present. This arrangement changes no policy defaults. The example has five regional databases and fifteen primary shards before replicas. US consists of us-west-2/us-east-1/us-east-2; EU consists of eu-west-1/eu-central-1. Clients and group memberships remain distinct from database shard counts.
 
 ## Redis deployment
 
@@ -63,9 +63,9 @@ Keep the following choices separate. These are proposed configuration concepts, 
 - `acknowledgment`: `local` baseline, or explicit `all-targets` for independent mode.
 - `recovery`: explicitly `request-only` or `durable-replay` for independent mode; application recovery is not applicable to native Active-Active transport.
 - `readPolicy`: `latest` by default, explicit `required` or `any` per operation.
-- Local endpoint, geographic labels, target list/configuration epoch, and bounded write/read/retry deadlines.
+- Local endpoint, explicit geographic groups (US: us-west-2/us-east-1/us-east-2; EU: eu-west-1/eu-central-1), target list/configuration epoch, and bounded write/read/retry deadlines.
 
-Reject unknown or unsupported combinations before serving requests. Independent mode needs a nonempty authoritative target set including the origin. Replay-enabled mode requires a validated capture/worker configuration; request-only does not require a worker. Active-Active uses origin writes and native transport; all-target adapter verification for that mode is not specified in this phase. All-target success verifies the exact captured set and never silently shrinks it.
+Reject unknown or unsupported combinations before serving requests. Independent mode needs a nonempty authoritative target set including the origin. Replay-enabled mode requires a validated capture/worker configuration; request-only does not require a worker. Active-Active uses origin writes and native transport; all-target adapter verification for that mode is not specified in this phase. All-target success verifies the exact captured set and never silently shrinks it. Group metadata does not itself filter that set: with all five regional targets configured, all-targets waits for all five. Waiting only for the origin group while distributing asynchronously to the foreign group would require a separately specified acknowledgment participant set; it is not silently selected here. Local acknowledgment remains the baseline, with cross-group distribution outside its critical path.
 
 The target is local RYOW regardless of transport. Independent request-only refreshes on the next same-session insert/update; replay optionally preserves historical delivery obligations. [backends.md](backends.md) owns the detailed distribution protocol and [decisions.md](decisions.md) diagrams the options.
 
@@ -87,10 +87,10 @@ The target is local RYOW regardless of transport. Independent request-only refre
 | R12 | Bound resource use, distribute sessions over shards, and sanitize telemetry | V13, V15 |
 | R13 | State cross-caller and revocation limitations explicitly | V14 |
 | R14 | Support default latest-local and explicit required/any policies without implicit downgrade or context rollback | V16, V17, V19 |
-| R15 | Assume no cross-client context sharing; same-region A2 and remote B1/C1 cannot infer or require A1’s unknown version | V18, V27 |
-| R16 | Preserve the agreed A1/A2/B1/C1 local read/write behavior and distinguish it from strict geographic consistency | V20, V28 |
+| R15 | Assume no cross-client context sharing; same-region A2 and remote B1/C1/D1/E1 cannot infer or require A1’s unknown version | V18, V27 |
+| R16 | Preserve the agreed A1/A2/B1/C1/D1/E1 local read/write behavior and distinguish it from strict geographic consistency | V20, V28 |
 | R17 | Independent mode supports explicit request-only or durable-replay recovery; next insert/update distributes only the latest version when replay is off; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
-| R18 | Validate policy combinations; distinguish local acceptance from all-target placement acknowledgment; preserve targets on timeout | V22, V25 |
+| R18 | Validate policy combinations; distinguish local acceptance from all-target placement acknowledgment; preserve targets on timeout | V22, V25, V29 |
 
 ## Proposed adapter API
 

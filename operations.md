@@ -8,7 +8,7 @@ Related: [spec.md](spec.md), [validation.md](validation.md)
 
 Record each regional endpoint, geographic group, distribution mode, Active-Active identity when applicable, Redis Software 8.x build, compatibility version, three primary data shards, replicas, persistence, eviction policy, and capacity. Keep credentials outside Git. Confirm supported commands against the deployed Active-Active configuration.
 
-Redis handles transport in Active-Active mode; independent mode requires the durable fan-out/replay path in [backends.md](backends.md). Default acknowledgment does not wait for every target; optional independent `all-targets` acknowledgment does. Cell changes update application endpoint discovery; Redis participant changes follow supported product procedures and readiness checks. Neither change may drop caller context.
+Redis handles transport in Active-Active mode; independent mode requires fan-out with explicitly selected request-only or durable-replay recovery as described in [backends.md](backends.md). Default acknowledgment does not wait for every target; optional independent `all-targets` acknowledgment does. Cell changes update application endpoint discovery; Redis participant changes follow supported product procedures and readiness checks. Neither change may drop caller context.
 
 ## Freshness and recovery
 
@@ -40,4 +40,4 @@ Record incidents with sanitized context, violated requirement, observed topology
 
 ## Independent fan-out operations
 
-Monitor per-origin backlog, per-target delivery/verification, oldest undelivered record, replay failures, digest conflicts, expiry handling, and backpressure. Rehearse crash-after-capture, partial fan-out, worker restart, duplicate/reordered delivery, gap-free region catch-up, restore, and safe target removal. A worker must finish obligations after the request process exits. Do not trim the outbox before the accepted delivery/recovery policy permits it. Preserve captured target membership for all-target retries and report ambiguous outcomes without silent shrinkage.
+Monitor per-origin backlog, per-target delivery/verification, oldest undelivered record, replay failures, digest conflicts, expiry handling, and backpressure. Rehearse crash-after-capture, partial fan-out, worker restart, duplicate/reordered delivery, gap-free region catch-up, restore, and safe target removal. When replay is enabled, a worker must finish retained obligations after the request process exits. Request-only mode persists no obligation: incomplete copies require caller/operator repair and may otherwise remain absent indefinitely. Do not trim the outbox before the accepted delivery/recovery policy permits it. Preserve captured target membership for all-target retries and report ambiguous outcomes without silent shrinkage.

@@ -20,7 +20,7 @@ The repository contains documentation only. Language, client, CI, provisioning, 
 | 4 | Add `src/context/` and `src/middleware/` for protected context issuance, cross-device handoff, propagation, and caller sequencing | V02, V06, V08, V09 |
 | 5 | Add `src/strategies/read-your-own-writes/` for required exact-snapshot checks, bounded waiting, explicit freshness errors, default latest-local candidate validation, and opt-in any-version local hint reads | V03–V05, V07, V10 |
 | 6 | Add `tests/contracts/`, `tests/integration/`, and `tests/faults/` using real instances of each configured backend mode | V01–V14 and V16–V20 with reproducible delays, response loss, expiry, and restore |
-| 6a | For independent mode, add `src/distribution/`, `src/outbox/`, and replay worker deployment; specify capture atomicity, per-target idempotency, hints, expiry, and target epochs in backends.md | V21–V22 and the common read-contract scenarios |
+| 6a | For independent mode, add `src/distribution/` with request-only behavior and optional `src/outbox/`/replay worker deployment; specify capture atomicity, per-target idempotency, hints, expiry, and target epochs in backends.md | V21–V23 and the common read-contract scenarios |
 | 7 | Add `benchmarks/` and a single verification entry point; wire CI | V15 measured results against accepted targets |
 | 8 | Update operations.md and CLAUDE.md with actual run/recovery commands and staging evidence | Rollout and rollback rehearsal |
 

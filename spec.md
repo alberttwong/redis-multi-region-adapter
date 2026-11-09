@@ -57,7 +57,7 @@ Pin the product build, database compatibility version, client, supported command
 
 Active-Active supplies CRDT replication and eventual convergence; see the [product overview](https://redis.io/docs/latest/operate/rs/databases/active-active/). Optional [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) preserves causal ordering but does not prove the destination already has a caller's snapshot. The adapter's exact-record check provides that evidence. Neither three shards nor causal configuration replaces context propagation.
 
-See [backends.md](backends.md) for the independent mode: adapter-managed idempotent fan-out to all configured regions, recoverable origin capture, replay, and optional `all-targets` acknowledgment. Proposed independent default is `local-durable-replay`; Active-Active continues to write once using Redis-managed transport. Both use the same read policies. Required transport/capture capabilities must be validated before a mode can be enabled; a polling adapter alone does not replicate independent databases.
+See [backends.md](backends.md) for the independent mode: adapter-managed idempotent fan-out to all configured regions, optional recoverable origin capture/replay, and optional `all-targets` acknowledgment. Select recovery explicitly as `request-only` or `durable-replay`; acknowledgment is separately `local` or `all-targets`. See [decisions.md](decisions.md). Request-only has no automatic crash-surviving repair or eventual-delivery promise; Active-Active continues to write once using Redis-managed transport. Both use the same read policies. Required transport/capture capabilities must be validated before a mode can be enabled; a polling adapter alone does not replicate independent databases.
 
 ## Requirements
 
@@ -79,7 +79,7 @@ See [backends.md](backends.md) for the independent mode: adapter-managed idempot
 | R14 | Support default latest-local and explicit required/any policies without implicit downgrade or context rollback | V16, V17, V19 |
 | R15 | Transfer required-version context to authorized Device B through authenticated handoff | V18 |
 | R16 | Preserve the agreed A-local/B-local behavior and distinguish it from strict geographic consistency | V20 |
-| R17 | Independent mode must capture and replay immutable fan-out durably with idempotent per-target application | V21 |
+| R17 | Independent mode supports explicit request-only or durable-replay recovery; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
 | R18 | Distinguish local acceptance from optional all-target placement acknowledgment; preserve captured targets on timeout | V22 |
 
 ## Proposed adapter API
@@ -126,7 +126,7 @@ This is an additional proposed schema, not an existing Redis freshness capabilit
 
 1. Serialize writes in one caller lineage. Create one operation ID and uniquely generated snapshot identity; retain them for retries.
 2. Validate caller context and allocate its next lineage sequence in the middleware's sequencing mechanism. The mechanism is a detailed-design decision, not a global session authority.
-3. Write the immutable envelope at the selected origin using verified backend-supported commands. In independent mode, bind the recoverable fan-out obligation to origin acceptance; deliver copies using the same ID and payload.
+3. Write the immutable envelope at the selected origin using verified backend-supported commands. In independent mode with durable replay enabled, bind the recoverable fan-out obligation to origin acceptance; deliver copies using the same ID and payload.
 4. Establish origin acceptance under the agreed local durability policy, then issue protected context together with the success response. No remote acknowledgment is required by the default policy. Optional independent `all-targets` acknowledgment additionally verifies every captured participant before success.
 5. Persist the new context before issuing a dependent read; reject older responses that try to replace it.
 

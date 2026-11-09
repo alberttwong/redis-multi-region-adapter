@@ -10,6 +10,7 @@ Device B defaults to **latest local + RYOW**, and can explicitly choose **requir
 
 | File | Purpose |
 | --- | --- |
+| [decisions.md](decisions.md) | Configuration, recovery, version 42, and read-policy diagrams |
 | [backends.md](backends.md) | Active-Active versus independent databases, fan-out, and acknowledgment policies |
 | [consistency.md](consistency.md) | Consistency levels, default policy, and Device A/B examples |
 | [intent.md](intent.md) | Desired outcome and boundaries |
@@ -23,7 +24,7 @@ Device B defaults to **latest local + RYOW**, and can explicitly choose **requir
 
 ## Selected scope
 
-Active-Active mode uses Redis-managed replication. Independent mode uses adapter-managed fan-out with durable replay; it may optionally wait for all target copies. The adapter supplies caller context, exact-snapshot validation, and bounded freshness waits. No home cluster, geographic write barrier, or strict commit authority is required for this phase. Other callers' updates and immediate global revocation are outside the RYOW guarantee.
+Active-Active mode uses Redis-managed replication. Independent mode uses adapter-managed fan-out with optional durable replay; it may optionally wait for all target copies. The adapter supplies caller context, exact-snapshot validation, and bounded freshness waits. No home cluster, geographic write barrier, or strict commit authority is required for this phase. Other callers' updates and immediate global revocation are outside the RYOW guarantee.
 
 The proposal uses immutable snapshots and a caller-carried snapshot identity, avoiding a global revision counter. Application middleware carries this context; business code does not poll Redis or compare versions. Without context, exact-ID lookup remains eventual and cannot claim cross-region RYOW.
 

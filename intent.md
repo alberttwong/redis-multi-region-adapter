@@ -14,7 +14,7 @@ A caller updates a session in one region, then moves to another before replicati
 
 An in-process adapter preserves read-your-own-writes across cells and regions. An acknowledged write returns both its immutable record identity and context for subsequent reads. Middleware propagates that context so a default read returns an eligible local snapshot that incorporates the caller’s write, the required snapshot itself, or an explicit failure to satisfy freshness within its deadline.
 
-This phase chooses RYOW rather than strict geographic consistency. It does not require a read to observe another caller's later update. It does not require every geographic participant to apply a write before acknowledgment.
+This phase chooses RYOW rather than strict geographic consistency. It does not require a read to observe another caller's later update. The default does not require every geographic participant to apply a write before acknowledgment. Independent mode can optionally wait for all configured target copies; this is placement verification, not strict consistency.
 
 ## Device B read options
 
@@ -26,7 +26,7 @@ After A writes 42 in Region A, A's local read carries its context and returns 42
 
 ## Platform and users
 
-Use Redis Software 8.x Active-Active, with three primary data shards per regional database instance; replicas are additional. Developers integrate the adapter, platform engineers operate Redis, and service owners define latency, persistence, expiry, and security requirements.
+Offer Redis Software 8.x with either Active-Active or independent regional databases with adapter-managed fan-out, using three primary data shards per regional database; replicas are additional. Developers integrate the adapter, platform engineers operate Redis, and service owners define latency, persistence, expiry, and security requirements.
 
 Reference groups are US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units, not automatically Redis participants. Context follows the caller even across geographic groups; replication remains asynchronous.
 

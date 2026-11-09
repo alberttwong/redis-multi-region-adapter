@@ -40,7 +40,7 @@ These references were checked on 2026-11-09. No exact-version support matrix, ve
 
 | ID | State | Decision or question | Suggested reviewer |
 | --- | --- | --- | --- |
-| D01 | Required by user | Redis Software 8.x Active-Active | Platform owner, unassigned |
+| D01 | Extended by user | Redis Software 8.x: Active-Active plus a non-Active-Active regional option | Platform owner, unassigned |
 | D02 | Assumption | Three primary data shards per regional instance; replicas additional | Platform owner, unassigned |
 | D03 | Selected by user, 2026-11-09 | Target read-your-own-writes across regions; defer geographic barriers and strict consistency | Repository owner |
 | D04 | Open | Pin Software build, compatibility version, replicas, persistence, and supported commands | Platform owner, unassigned |
@@ -61,3 +61,7 @@ For future acceptance, append artifact revision, reviewer, date, decision, ratio
 ## Conversation decisions consolidated
 
 The user selected RYOW, then requested cross-device exact-version or any-version reads. Exact 42 was explained as a specific immutable snapshot, not latest or at-least-42. The user subsequently required latest as the default and explicitly selected “latest known locally, while honoring the caller’s last write (RYOW)” when asked to choose its scope. This latest selection supersedes the earlier proposed required-version default, while preserving exact and any as explicit options. Strict geographic/global consistency remains deferred. Device B’s missing 42 still needs transferred authenticated context to enforce that requirement.
+
+## Additional backend option
+
+The user requested a Redis 8.x option without Active-Active and asked why the adapter cannot write to all regions. It can: backends.md proposes independent regional Redis Software 8.x databases with idempotent adapter-managed fan-out and durable replay. The Software product and three-primary-shard layout are retained from prior requirements. Proposed acknowledgment policies are local-durable-replay by default and all-targets optionally. These are implementation proposals; the user has not selected a capture technology or final persistence contract. Read policy stays latest-local-ryow. Ordinary [Redis replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) is leader/follower replication, not automatic independent writable database synchronization (checked 2026-11-09).

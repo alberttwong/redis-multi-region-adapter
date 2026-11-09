@@ -2,11 +2,13 @@
 
 ## Context
 
-Documentation-only repository. Read README.md, intent.md, spec.md, and plan.md. The selected target is read-your-own-writes (RYOW), using Redis Software 8.x Active-Active with three primary data shards per regional database instance; replicas are additional. Pin exact builds before deployment.
+Documentation-only repository. Read README.md, intent.md, spec.md, and plan.md. The selected target is read-your-own-writes (RYOW), using Redis Software 8.x with three primary data shards per regional database; replicas are additional. Pin exact builds before deployment.
 
 ## Commands
 
 No build, test, lint, provisioning, or deployment commands exist. Add verified commands and expected outcomes after selecting the implementation stack. Do not claim proposed tests have run.
+
+Read backends.md for Active-Active and independent regional modes. Independent mode needs adapter-managed fan-out and durable replay; local polling alone does not replicate. Active-Active writes once. Optional all-target acknowledgment verifies placement, not strict ordering.
 
 ## Rules
 
@@ -18,7 +20,7 @@ No build, test, lint, provisioning, or deployment commands exist. Add verified c
 - An unprotected exact-ID miss may return `null`; distinguish explicit expiry from unavailable data.
 - Local discovery hints serve `any` and default `latest`. They are eventual; only additional caller-context validation can establish RYOW. Never treat them as global latest-state or authorization proof.
 - Serialize writes in one caller lineage; prevent older responses from replacing newer context.
-- No automatic remote fallback, all-member barrier, strict commit authority, or fixed home cluster in this phase.
+- No automatic remote fallback, strict commit authority, or fixed home cluster. Default acknowledgment does not wait for all regions; independent mode can explicitly select all-target placement acknowledgment.
 - Agreed A/B behavior: after A writes 42, A reads 42/proven successor with context; B without transferred context may read local 41 or `null`. B with context must satisfy it or fail.
 - RYOW does not guarantee another caller's newest update or immediate global revocation.
 - Three shards do not constitute regions or consensus. Cells and Redis membership are distinct.

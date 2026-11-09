@@ -17,11 +17,11 @@ The default read policy is **latest known locally while honoring the caller's la
 Explicit `required` reads request one exact snapshot, even when a newer snapshot exists. Explicit `any` reads permit any valid local candidate without the RYOW freshness constraint. These policies are distinct; exact-version reads do not redefine the default.
 This contract spans same-cell, same-region, cross-region, and US/EU movement. Other callers may have newer snapshots that this caller has not observed. No global latest-state discovery, per-session linearizability, or strict geographic/global commit ordering is promised. All-target placement verification is available only under the explicit independent-backend acknowledgment policy.
 
-The caller lineage is a middleware-managed chain of sequential writes and their following reads, not every device belonging to the same account. A different device does not inherit guarantees unless context is explicitly transferred through an authenticated mechanism. Reads issued before a write completes are concurrent and do not yet carry its guarantee.
+The caller lineage is a middleware-managed chain of sequential writes and their following reads, not every device belonging to the same account. Client A reads/writes in `us-west-2`; independent client B reads/writes in `us-east-1`. B has no direct or out-of-band communication with writer A and receives none of A’s context or version IDs. Context follows the same caller across requests/regions; cross-device handoff and shared latest-version discovery are outside scope. Reads issued before a write completes are concurrent and do not yet carry its guarantee.
 
 ## Explicit read policies
 
-Device B can choose among three policies per request:
+The API supports three read policies. Protected policies require known authenticated context. Independent B has no context for A’s writes, so B’s default latest is local discovery and cannot require an unknown version 42:
 
 | Policy | Request needs | Result at Region B |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ Device B can choose among three policies per request:
 
 Here, “version 42” denotes an immutable snapshot identity in an identified generation/lineage, not a globally ordered integer. `required` means exactly 42. The default `latest` means local discovery constrained by the caller's RYOW context, not the newest completed update across a geographic group or the world. A separate arbitrary “at least 42” API is deferred; the default's freshness floor is the caller's authenticated context.
 
-For cross-device required reads, an authenticated handoff must issue context usable by authorized Device B. Do not simply reuse a token bound exclusively to Device A. Possession of a version ID alone does not authorize session access. Missing handoff context in `required` mode is an error; it must not select `any` automatically.
+B cannot ask for A’s unknown version 42, detect that it is missing, or wait specifically for it. An explicit `required` request without valid known-version context is a context error. B can use default `latest` or explicit `any` against local state. B also writes locally: each acknowledged B write establishes B’s own RYOW context; it still does not convey A’s unknown history. Possession of a version ID does not itself authorize session access.
 
 An application may deliberately choose `any` for a separate request after a required-read failure, but the adapter never makes that downgrade itself. An `any` read does not replace or reduce the caller's protected context. A deliberately requested historical exact read likewise does not reduce the context used for subsequent default latest reads. Return actual snapshot identity/generation and effective read policy alongside a successful payload so applications can distinguish the outcome without implementing freshness checks.
 
@@ -39,9 +39,11 @@ An application may deliberately choose `any` for a separate request after a requ
 
 A **snapshot** identifies an immutable session version. Its identity includes session generation and a unique record ID. Numbers such as 42 and 43 are explanatory labels, not a global Redis revision counter.
 
-A **lineage** is a serialized chain of writes. A **proven successor** has authenticated history showing it follows the required write in that lineage. It need not preserve every old field value: a later intentional update may change state. Independent device lineages are incomparable unless an accepted transfer/merge protocol proves otherwise.
+A **lineage** is a serialized chain of writes. A **proven successor** has authenticated history showing it follows the required write in that lineage. It need not preserve every old field value: a later intentional update may change state. Independent device lineages are incomparable; a cross-device transfer/merge protocol is outside this phase.
 
 A **target** is a regional database in the captured fan-out configuration, not a primary shard, local HA replica, or application cell. A **protected read** carries a prior-write or exact-version requirement. See [consistency.md](consistency.md) for the agreed A/B scenario and strict geographic comparison.
+
+The baseline pairs reads and writes locally for each client: A uses `us-west-2`, B uses `us-east-1`. The region layout changes no defaults: `latest` remains the read policy, local acknowledgment remains the baseline, and independent recovery must still be selected explicitly. B’s own context protects B against older state than its own write; it conveys no requirement for A’s unseen update. Concurrent A/B lineages are not globally ordered merely because both clients use RYOW.
 
 ## Redis deployment
 
@@ -83,7 +85,7 @@ The target is local RYOW regardless of transport. Independent request-only refre
 | R12 | Bound resource use, distribute sessions over shards, and sanitize telemetry | V13, V15 |
 | R13 | State cross-caller and revocation limitations explicitly | V14 |
 | R14 | Support default latest-local and explicit required/any policies without implicit downgrade or context rollback | V16, V17, V19 |
-| R15 | Transfer required-version context to authorized Device B through authenticated handoff | V18 |
+| R15 | Assume no A-to-B application communication; B cannot infer or require A’s unknown version or context | V18 |
 | R16 | Preserve the agreed A-local/B-local behavior and distinguish it from strict geographic consistency | V20 |
 | R17 | Independent mode supports explicit request-only or durable-replay recovery; next insert/update distributes only the latest version when replay is off; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
 | R18 | Validate policy combinations; distinguish local acceptance from all-target placement acknowledgment; preserve targets on timeout | V22, V25 |

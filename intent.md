@@ -10,9 +10,11 @@ The selected contract is **latest local with read-your-own-writes (RYOW)**. The 
 
 ## Agreed Device A/B scenario
 
-A writes 42 in Region A and receives context. A's subsequent local read returns 42 or a proven successor. B in Region B without that context may see 41 or `null`. With authenticated context transferred to B, its default read must return 42/a proven successor or a freshness error described as **snapshot missing**.
+Client A reads and writes in `us-west-2`; independent client B reads and writes in `us-east-1`. They have no direct or out-of-band application communication: no shared write token, context handoff, revision notification, or shared latest-version directory. Redis-managed replication or adapter fan-out still transports session data between regional databases.
 
-This is not strict geographic consistency: B without context need not see another device's completed update. The guarantee follows caller context. Detailed examples live in [consistency.md](consistency.md).
+A writes 42 in `us-west-2` and receives context. A's subsequent local reads return 42/a proven successor or report snapshot missing. B reads local `us-east-1` Redis state, using context from B's own acknowledged writes when present. Before 42 arrives and becomes its local candidate, B may see 41 or null and cannot know that 42 exists. B has no freshness wait for A's unknown write. B’s own write establishes a separate protected context; A receives no notification of it. This regional arrangement does not change the latest-local + RYOW default.
+
+This is not strict geographic consistency. The guarantee follows A's own context; it is not automatically shared with B. Detailed examples live in [consistency.md](consistency.md).
 
 ## Platform and delivery choices
 
@@ -24,7 +26,7 @@ Reference geography is US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-we
 
 ## Users, constraints, and success
 
-Developers integrate the adapter, platform engineers operate transport and databases, and service/security owners set durability, expiry, and authorization policies. Middleware propagates protected context across cells, regions, and authorized device handoffs. There is no automatic remote read fallback or silent downgrade to stale reads.
+Developers integrate the adapter, platform engineers operate transport and databases, and service/security owners set durability, expiry, and authorization policies. Middleware propagates protected context for the same caller across cells and regions. There is no automatic remote read fallback or silent downgrade to stale reads.
 
 Pass the applicable scenarios in [validation.md](validation.md), with measured targets agreed before production acceptance. Distinguish snapshot missing, ordinary eventual absence, explicit expiry, and infrastructure failure. Exclude payloads, credentials, bearer IDs, and raw context from telemetry.
 

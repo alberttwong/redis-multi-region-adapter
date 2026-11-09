@@ -21,21 +21,27 @@ Independent request-only fan-out can leave missed versions undelivered. It attem
 
 ## Agreed scenario
 
-Assume A's write of 42 completes before the reads start. Region B still has 41 or no record.
+Client A reads and writes in `us-west-2`; client B independently reads and writes in `us-east-1`. Assume A's write of 42 completes before the reads start, and B has no context from a separate B write for this example. B's local database still has 41 or no record. **A and independent reader B do not communicate:** no context transfer, version notification, or shared latest-version directory is assumed. Data can still arrive through Redis replication or adapter fan-out.
 
 ```mermaid
 flowchart TD
-    Write["A writes 42 in Region A and receives context"] --> A["A reads Region A with context"]
-    A --> AR["Return 42 or proven successor; otherwise report snapshot missing"]
-    Write --> B["B reads Region B"]
-    B --> Token{"Does B carry authenticated context for 42?"}
-    Token -->|No| Old["Local 41 or null is permitted"]
-    Token -->|Yes| Protected["Return 42 or proven successor; wait locally or report snapshot missing"]
+    Write["A writes 42 in us-west-2; only A receives write context"] --> A["A reads us-west-2 with its own write context"]
+    A --> AR["Return 42 or proven successor; wait or report snapshot missing"]
+    Write --> Delivery["Redis replication or adapter fan-out transports data"]
+    B["Independent B reads us-east-1; no communication from A"] --> Local["Read valid local candidate"]
+    Local --> Before["Before 42 arrives: 41 or null is permitted; B does not know 42 exists"]
+    Delivery --> After["After 42 arrives and becomes local candidate: B can return 42"]
 ```
 
-Devices do not automatically share context. An authorized handoff can give B the freshness requirement without strict geographic consistency. Expiry, integrity, and infrastructure errors remain distinct from a missing snapshot.
+B does not wait for an unknown A write or report missing 42. Context errors mean invalid/lost context for an actual requirement, not lack of another caller's context. Exact-version reads remain available to callers with valid known-version context; no handoff feature is included. Expiry, integrity, and infrastructure errors remain distinct from snapshot missing.
 
 Strict geographic differs specifically for B without context: within the same group, a read beginning after completed write 42 must reflect 42 or a later committed update, or fail. Our design permits B's older local state. Across different geographic groups, strict geographic alone does not make foreign projections current.
+
+## Both clients write; defaults are unchanged
+
+If B inserts/updates locally in `us-east-1`, its successful response provides B’s own write context. B’s subsequent default reads must honor that B write or report snapshot missing. A similarly uses its own context in `us-west-2`. Neither client receives the other’s context.
+
+A concurrent B version is not automatically a proven successor to A’s 42. Protected latest uses the existing lineage/provenance rule; it does not invent a global order across the two writers. Independent readers without their own prior-write requirement use local discovery. `latest` remains the default; the region layout does not select a different acknowledgment or recovery mode.
 
 ## Latest, exact, and any are read policies
 

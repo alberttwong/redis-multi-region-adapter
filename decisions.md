@@ -44,7 +44,7 @@ flowchart TD
 
 Option A is Active-Active: write once at the origin and let Redis manage transport and recovery under the configured persistence/availability contract. It does not require an application outbox for regional transport.
 
-B and D attempt distribution again on the next insert/update for the same session. Each write carries a complete immutable snapshot, so a successful later delivery can refresh current local state without replaying every historical snapshot. With no later write, a region can remain stale. Request-only mode does not retain a crash-surviving historical delivery obligation. A successful all-target write proves placement at acknowledgment under its contract, not permanent availability, rollback of partial copies, or strict geographic consistency.
+B and D attempt distribution again on the next insert/update for the same session. Each write distributes only its latest version; a successful later delivery can refresh current local state without replaying earlier versions. With no later write, a region can remain stale. Request-only mode does not retain a crash-surviving historical delivery obligation. A successful all-target write proves placement at acknowledgment under its contract, not permanent availability, rollback of partial copies, or strict geographic consistency.
 
 ## Benefits and costs of each deployment choice
 

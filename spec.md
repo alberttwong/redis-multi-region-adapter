@@ -37,7 +37,7 @@ An application may deliberately choose `any` for a separate request after a requ
 
 ## Scope and terminology
 
-A **snapshot** is a complete immutable session state. Its identity includes session generation and a unique record ID. Numbers such as 42 and 43 are explanatory labels, not a global Redis revision counter.
+A **snapshot** identifies an immutable session version. Its identity includes session generation and a unique record ID. Numbers such as 42 and 43 are explanatory labels, not a global Redis revision counter.
 
 A **lineage** is a serialized chain of writes. A **proven successor** has authenticated history showing it follows the required write in that lineage. It need not preserve every old field value: a later intentional update may change state. Independent device lineages are incomparable unless an accepted transfer/merge protocol proves otherwise.
 
@@ -85,7 +85,7 @@ The target is local RYOW regardless of transport. Independent request-only refre
 | R14 | Support default latest-local and explicit required/any policies without implicit downgrade or context rollback | V16, V17, V19 |
 | R15 | Transfer required-version context to authorized Device B through authenticated handoff | V18 |
 | R16 | Preserve the agreed A-local/B-local behavior and distinguish it from strict geographic consistency | V20 |
-| R17 | Independent mode supports explicit request-only or durable-replay recovery; next insert/update repeats complete-snapshot fan-out when replay is off; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
+| R17 | Independent mode supports explicit request-only or durable-replay recovery; next insert/update distributes only the latest version when replay is off; enabled replay captures obligations durably; all fan-out is idempotent | V21, V23 |
 | R18 | Validate policy combinations; distinguish local acceptance from all-target placement acknowledgment; preserve targets on timeout | V22, V25 |
 
 ## Proposed adapter API
@@ -104,7 +104,7 @@ Keep protected and unprotected operations explicit. Middleware persists and forw
 
 ## Data and context
 
-Store a whole immutable envelope as a serialized String; suggested key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`. Whole-record access avoids mutable field merges for the required snapshot. Hash tags colocate one session's keys where needed within a regional database, without coordinating regions. Session identifiers distribute across three shards.
+Store a whole immutable envelope as a serialized String; suggested key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`. This is a proposed storage envelope for one identified version; request-only fan-out does not require a complete session snapshot or resending earlier versions. Hash tags colocate one session's keys where needed within a regional database, without coordinating regions. Session identifiers distribute across three shards.
 
 The envelope binds schema version, session identity, generation, uniquely generated record ID, payload, digest, and server-assigned absolute expiry. A proposed context binds session identity, generation, record ID, digest, expiry, origin endpoint identity, operation ID, and a middleware-managed lineage sequence. These are application fields, not native Redis metadata. Protect token integrity and bind it to the authenticated caller; a digest alone is not authentication. Never log raw tokens or bearer record IDs.
 
@@ -122,7 +122,7 @@ This is an additional proposed schema, not an existing Redis freshness capabilit
 
 1. Middleware defaults an omitted policy to `latest` and attaches any stored prior-write context. A malformed context or an expected context that was lost is an error; an authenticated first read with genuinely no prior context may use eventual local discovery.
 2. Read the local candidate envelope. With no prior-write requirement, return that valid candidate or `null` if absent/expired; this cannot discover another device's unpropagated update.
-3. With context for 42, return candidate 42, or candidate 43 only with verified evidence that it incorporates 42. In the initial proposal, that evidence is the same protected lineage/generation plus a greater sequence issued under the accepted single-writer sequencing mechanism. Each later lineage write must represent the next full state after its predecessor. Later updates may intentionally overwrite old values; the history proof establishes ordering, not bitwise payload inclusion. Numeric version comparison, Redis last-write-wins, or publication time alone is insufficient.
+3. With context for 42, return candidate 42, or candidate 43 only with verified evidence that it incorporates 42. In the initial proposal, that evidence is the same protected lineage/generation plus a greater sequence issued under the accepted single-writer sequencing mechanism. Each later lineage write must represent a valid successor to its predecessor. Later updates may intentionally overwrite old values; the history proof establishes ordering, not bitwise payload inclusion. Numeric version comparison, Redis last-write-wins, or publication time alone is insufficient.
 4. If the candidate is older, missing, or belongs to an incomparable concurrent lineage, look up exact 42. While waiting within the deadline, recheck both the local candidate and exact 42; a newly arrived proven successor can complete a default latest read even if 42 remains missing. Returning 42 here honors RYOW, even if an incomparable local candidate exists. Do not imply a total newest-version order across devices.
 5. If neither the required snapshot nor a proven successor becomes available by the deadline, report snapshot missing. Integrity-invalid records produce an integrity error, never an older successful result. A proven descendant returned by `latest` advances protected caller context without permitting rollback. Explicit `any` and historical exact reads do not reduce that context.
 
@@ -131,7 +131,7 @@ This is an additional proposed schema, not an existing Redis freshness capabilit
 ## Write and retry path
 
 1. Serialize writes in one caller lineage. Create one operation ID and uniquely generated snapshot identity; retain them for retries.
-2. Validate caller context and construct the complete next session state under the accepted lineage protocol, then allocate its next sequence. Do not derive a successor from stale state that omits the required predecessor. If predecessor-dependent update construction is impossible locally, fail explicitly rather than inventing a proof. The sequencing mechanism is a detailed-design decision, not a global session authority.
+2. Validate caller context and identify the latest version under the accepted lineage protocol, then allocate its next sequence. Do not derive a successor from stale state that omits the required predecessor. If predecessor-dependent update construction is impossible locally, fail explicitly rather than inventing a proof. The sequencing mechanism is a detailed-design decision, not a global session authority.
 3. Write the immutable envelope at the selected origin using verified backend-supported commands. In independent mode with durable replay enabled, bind the recoverable fan-out obligation to origin acceptance; deliver copies using the same ID and payload.
 4. Establish origin acceptance under the agreed local durability policy. For replay-enabled independent mode, also establish recoverable obligation capture before success. Issue protected context only when the configured acknowledgment condition is satisfied. No remote acknowledgment is required by the default policy. Optional independent `all-targets` acknowledgment additionally verifies every captured participant before success.
 5. Persist the new context before issuing a dependent read; reject older responses that try to replace it.
@@ -168,7 +168,7 @@ Successful reads return payload, actual snapshot identity/generation, and effect
 - **Context/integrity/infrastructure error:** reject invalid context, corrupt identity/content, or connectivity/authentication failure distinctly; none becomes null or a missing snapshot.
 - **Partial/uncertain write:** some effects may exist but configured success cannot be confirmed. Preserve original IDs and targets for reconciliation. Do not issue normal successful-write context or imply rollback.
 
-A next insert/update sends its own new complete snapshot. It may refresh current state without restoring exact historical 42. Default latest can use 43 only with verified successor evidence; exact 42 remains missing. No automatic remote read fallback or downgrade changes these outcomes.
+A next insert/update distributes only its latest version. It may refresh current state without restoring exact historical 42. Default latest can use 43 only with verified successor evidence; exact 42 remains missing. No automatic remote read fallback or downgrade changes these outcomes.
 
 ## Open implementation decisions
 

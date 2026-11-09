@@ -8,7 +8,7 @@ Documentation-only repository. Read README.md, intent.md, spec.md, and plan.md. 
 
 No build, test, lint, provisioning, or deployment commands exist. Add verified commands and expected outcomes after selecting the implementation stack. Do not claim proposed tests have run.
 
-Read backends.md for Active-Active and independent regional modes. Independent mode needs adapter-managed fan-out and durable replay; local polling alone does not replicate. Active-Active writes once. Optional all-target acknowledgment verifies placement, not strict ordering.
+Read backends.md for Active-Active and independent regional modes. Independent mode needs adapter-managed fan-out and an explicit request-only or durable-replay recovery policy; local polling alone does not replicate. Active-Active writes once. Optional all-target acknowledgment verifies placement, not strict ordering.
 
 ## Rules
 

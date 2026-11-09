@@ -56,7 +56,9 @@ The user agreed to this scenario. Device B does not automatically inherit Device
 
 ## Transport does not choose the consistency level
 
-The adapter can write the same immutable snapshot to all independent regional databases. Local acceptance plus durable replay preserves the default asynchronous behavior. Waiting for all target copies strengthens placement at acknowledgment and increases write latency/availability dependence; it does not order concurrent writes or establish strict geographic reads. The agreed A/B scenario still describes default local acknowledgment. Active-Active and independent modes share the same context and read-policy rules.
+The adapter can write the same immutable snapshot to all independent regional databases. Local acceptance with optional durable replay preserves the default asynchronous behavior. Waiting for all target copies strengthens placement at acknowledgment and increases write latency/availability dependence; it does not order concurrent writes or establish strict geographic reads. The agreed A/B scenario still describes default local acknowledgment. Active-Active and independent modes share the same context and read-policy rules.
+
+Independent request-only mode makes no eventual-delivery promise after a failed copy or process crash. Protected reads still fail safely, but convergence needs external repair. See [decisions.md](decisions.md) for combinations.
 
 ## Terminology
 

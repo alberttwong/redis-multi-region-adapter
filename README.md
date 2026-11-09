@@ -4,7 +4,14 @@ Design for **latest local with read-your-own-writes**, named `latest-local-ryow`
 
 ## Consistency
 
-The default is **latest local + RYOW**: return locally known state that honors the caller's last acknowledged write, or report **snapshot missing** after bounded waiting. The requirement follows authenticated caller context; other devices can still see older local state. Explicit reads can request one exact version or accept any valid local version. This does not provide strict geographic or global consistency. See [consistency.md](consistency.md).
+| Consistency level | What it guarantees | Coverage in this project |
+| --- | --- | --- |
+| **Eventual** | Regional values may differ while updates propagate, then converge when delivery completes. | Replication foundation in Active-Active; unprotected local reads have eventual semantics. Independent request-only delivery can leave gaps until a later write. |
+| **Read-your-own-writes (RYOW)** | A caller's dependent reads honor its acknowledged write, using carried context; unavailable required state is reported explicitly. Other callers may still see older state. | **Project target: latest local + RYOW (`latest-local-ryow`).** The default returns eligible local state or waits/reports snapshot missing. |
+| **Strict geographic** | All callers share one per-session ordered history within a geographic group; a read after a completed write reflects it or a later committed update. | Not covered; requires additional commit ordering, coordinated reads, fencing, and recovery. |
+| **Strict global** | The same per-session ordering guarantee spans all geographic groups. | Not covered; requires coordination across groups. |
+
+The requirement follows authenticated caller context. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
 
 ## Start here
 

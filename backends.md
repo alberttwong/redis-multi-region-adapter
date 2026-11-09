@@ -6,6 +6,8 @@ A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-e
 
 ## Choose distribution
 
+These two backend choices apply to eventual reads and the current latest-local + RYOW target. Future strict geographic/global modes would use Active-Active as the planned replication base, with an additional authority/commit protocol still to be designed and validated. Active-Active supplies strong eventual convergence, not strict ordering or immediate cross-region visibility. Independent-cluster strict modes are outside the planned scope; see [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+
 ```mermaid
 flowchart LR
     Redis["Redis Software 8.x regional databases"] --> AA["Active-Active"]

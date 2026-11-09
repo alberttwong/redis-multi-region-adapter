@@ -4,7 +4,7 @@ Updated: 2026-11-09. This document consolidates the conversation; [spec.md](spec
 
 ## Current target
 
-**Read-your-own-writes (RYOW), defaulting to latest known locally while honoring the caller’s last acknowledged write.** Explicit exact-version and any-version reads are also supported by the design. Redis Software 8.x Active-Active with three primary data shards per regional instance remains the platform. Replica shards are additional.
+**Read-your-own-writes (RYOW), defaulting to latest known locally while honoring the caller’s last acknowledged write.** Explicit exact-version and any-version reads are also supported by the design. Redis Software 8.x with three primary data shards per regional database remains the platform. [Backend options](backends.md) include Active-Active and independent databases with adapter-managed fan-out. Replica shards are additional.
 
 ## Four consistency levels discussed
 
@@ -53,6 +53,10 @@ Assume A's write of 42 has completed before either read begins, B's region still
 The selected guarantee follows caller context. Strict geographic establishes one per-session linearizable history for all callers in the group, so B does not need A's token to observe a completed update. It requires a shared ordering and safe-read/recovery protocol beyond replication and adapter polling. A geographic write-copy barrier alone is insufficient. Regions in different geographic groups would need a separately defined cross-group guarantee; strict geographic alone does not make foreign projections current.
 
 The user agreed to this scenario. Device B does not automatically inherit Device A's context. Default local reads can therefore remain stale for other devices; this is accepted behavior, not an implementation defect. Immediate cross-device revocation is not supplied by the selected guarantee.
+
+## Transport does not choose the consistency level
+
+The adapter can write the same immutable snapshot to all independent regional databases. Local acceptance plus durable replay preserves the default asynchronous behavior. Waiting for all target copies strengthens placement at acknowledgment and increases write latency/availability dependence; it does not order concurrent writes or establish strict geographic reads. The agreed A/B scenario still describes default local acknowledgment. Active-Active and independent modes share the same context and read-policy rules.
 
 ## Terminology
 

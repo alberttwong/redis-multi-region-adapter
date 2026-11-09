@@ -14,6 +14,8 @@ Review all three policies. Default `latest` requires local candidate plus verifi
 
 Check the agreed A/B scenario: A's context protects A's subsequent local read; B without transferred context may read 41 or `null` while 42 is propagating. Do not flag that accepted stale read as a RYOW defect or describe it as strict geographic consistency. B with transferred context must satisfy the carried requirement or fail explicitly.
 
+For independent mode, review durable capture before acknowledgment, duplicate/reordered fan-out, original expiry, hint selection, backlog retention/backpressure, and gap-free catch-up. Optional all-target success must verify every captured target; never claim it creates strict consistency. Active-Active must not duplicate non-idempotent business mutations across instances. See backends.md.
+
 ## Severity
 
 Critical: credential exposure, forged context crossing caller boundaries, or bypass of a separately required authorization policy. Important: a reproducible RYOW violation, unbounded wait, unsafe retry, context rollback, or false durability claim. Minor: clarity and maintainability without a behavioral impact.

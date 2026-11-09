@@ -6,7 +6,7 @@ Traceability: R identifiers refer to [spec.md](spec.md).
 
 | Case | Requirements | Stimulus and expected observation |
 | --- | --- | --- |
-| V01 | R01 | Read back each regional deployment: Redis Software 8.x build/compatibility version, Active-Active enabled, three primary data shards, replicas separate. |
+| V01 | R01 | Read back each regional deployment: Redis Software 8.x build/compatibility version, selected mode verified (Active-Active enabled, or independent databases with configured replay workers), three primary data shards, replicas separate. |
 | V02 | R02 | Round-trip envelopes and context. Detect conflicting record identity, digest corruption, generation mismatch, schema mismatch, and attempted payload overwrite. |
 | V03 | R03, R04 | Acknowledge a write in A, carry its context, then read in B. Exercise same-cell if deployed, same-region, cross-region, and US/EU movement. Return the exact required snapshot. |
 | V04 | R05, R09 | Compare unprotected miss (`null`), protected unexpired miss (bounded wait then freshness error), explicit expiry, connection rejection, TLS/authentication failure, and timeout. Do not conflate them. |
@@ -26,10 +26,12 @@ Traceability: R identifiers refer to [spec.md](spec.md).
 | V18 | R15 | A writes 42; authenticated handoff issues context for authorized B. B's required read returns exactly 42 or freshness error. Reject wrong-device/session tokens and missing context. A present 43 never substitutes for exact 42. |
 | V19 | R04, R14 | Omit read policy and verify `latest`. Context 42 plus local proven descendant 43 returns 43 and advances context. Local 41, absent candidate, or incomparable 43 falls back to exact 42 or bounded freshness failure. First read without prior context uses eventual local discovery. Lost expected context and invalid proof never silently weaken RYOW. Explicit exact 42 still returns 42 when 43 exists. |
 | V20 | R16 | Complete A's write 42, then read A locally with context and B locally without it while replication is delayed. A returns 42/proven successor; B may return local 41 or `null`. Transfer context to B: its default read now waits for 42/proven successor or fails explicitly. After catch-up, B can return 42. Verify no automatic context inheritance and record that stale B success would violate the deferred strict geographic contract within the same group. |
+| V21 | R17 | In independent mode, crash after capture, lose responses, and duplicate/reorder deliveries. Restart the worker: every retained obligation completes idempotently with matching IDs/digests, original expiry, no replay loops, no same-lineage hint rollback, bounded backlog/backpressure, and gap-free new-target catch-up. Missing durable capture prevents successful acknowledgment. |
+| V22 | R18 | Compare local-durable-replay with all-targets while delaying or partitioning B. Default local success allows B lag; all-targets success waits for every captured target to verify. Deadline yields partial/uncertain outcome with unchanged target set; retries reconcile. Confirm this does not claim atomic visibility, global ordering, or disk durability from readback. |
 
 ## Evidence
 
-Use unit tests for context/envelope/configuration behavior, middleware contract tests for caller ordering, and real Redis Software Active-Active integration tests for region movement and replication. A single-node test cannot certify this guarantee. Capture sanitized invocation/response histories, origin and destination, build, persistence, primary/replica layout, context sequence (not raw token), fault schedule, and results.
+Use unit tests for context/envelope/configuration behavior, middleware contract tests for caller ordering, and real Redis Software integration tests for both Active-Active and independent/replay configurations to exercise region movement and replication. A single-node test cannot certify this guarantee. Capture sanitized invocation/response histories, origin and destination, build, persistence, primary/replica layout, context sequence (not raw token), fault schedule, and results.
 
 The oracle checks caller-local RYOW, not global latest-state linearizability. For each protected read beginning after an acknowledged write and carrying its context, assert the returned snapshot matches the required identity, or for default latest-local is proven to incorporate it, or a typed failure is explicit. Failure is acceptable for safety during a partition; agreed service levels separately govern availability.
 

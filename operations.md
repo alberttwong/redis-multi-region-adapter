@@ -6,9 +6,9 @@ Related: [spec.md](spec.md), [validation.md](validation.md)
 
 ## Deployment
 
-Record each regional endpoint, geographic group, Active-Active identity, Redis Software 8.x build, compatibility version, three primary data shards, replicas, persistence, eviction policy, and capacity. Keep credentials outside Git. Confirm supported commands against the deployed Active-Active configuration.
+Record each regional endpoint, geographic group, distribution mode, Active-Active identity when applicable, Redis Software 8.x build, compatibility version, three primary data shards, replicas, persistence, eviction policy, and capacity. Keep credentials outside Git. Confirm supported commands against the deployed Active-Active configuration.
 
-Redis handles asynchronous transport. The adapter does not wait for all members on write acknowledgment. Cell changes update application endpoint discovery; Redis participant changes follow supported product procedures and readiness checks. Neither change may drop caller context.
+Redis handles transport in Active-Active mode; independent mode requires the durable fan-out/replay path in [backends.md](backends.md). Default acknowledgment does not wait for every target; optional independent `all-targets` acknowledgment does. Cell changes update application endpoint discovery; Redis participant changes follow supported product procedures and readiness checks. Neither change may drop caller context.
 
 ## Freshness and recovery
 
@@ -37,3 +37,7 @@ Thresholds, paging ownership, traffic targets, and persistence/RPO/RTO remain op
 Validate cross-region and cross-group movement in staging, then limit initial traffic. Rollback must preserve envelope/context formats, token verification, caller ordering, and the protected-read contract. If an older adapter cannot preserve context, pause protected operations rather than silently switch to eventual reads. No branch protection, release hook, or deployment permission is configured here.
 
 Record incidents with sanitized context, violated requirement, observed topology, mitigation, and uncertainty. Add regression scenarios and propose follow-up work through a new intent. Immediate global revocation requires a separate authorization mechanism and incident procedure.
+
+## Independent fan-out operations
+
+Monitor per-origin backlog, per-target delivery/verification, oldest undelivered record, replay failures, digest conflicts, expiry handling, and backpressure. Rehearse crash-after-capture, partial fan-out, worker restart, duplicate/reordered delivery, gap-free region catch-up, restore, and safe target removal. A worker must finish obligations after the request process exits. Do not trim the outbox before the accepted delivery/recovery policy permits it. Preserve captured target membership for all-target retries and report ambiguous outcomes without silent shrinkage.

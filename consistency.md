@@ -21,42 +21,57 @@ Independent request-only fan-out can leave missed versions undelivered. It attem
 
 ## Reference topology
 
-A1 and A2 each read/write in `us-west-2`; B1 reads/writes in `us-east-1`; C1 reads/writes in `us-east-2`. All four are independent clients. None shares application context, version notifications, or a latest-version directory with another. Each retains context from its own acknowledged writes.
+The six independent clients read/write locally:
 
-The example places A1 and A2 on the same logical regional Redis database; same-region placement alone does not imply a shared cell, connection, context store, or identical endpoint behavior. If they use different local databases/endpoints, that topology must be declared explicitly. Three primary shards belong to each regional database, not each client: this three-region example has nine primary data shards before replicas.
+- **US group:** A1/A2 in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`.
+- **EU group:** D1 in `eu-west-1`, E1 in `eu-central-1`.
+
+No client shares application context, version notifications, or a latest-version directory with another. Each retains context from its own acknowledged writes. A1/A2 share one logical regional Redis database in this example, but not an adapter instance or lineage. Actual cell/endpoint placement must be confirmed. Five regional databases with three primary shards each mean fifteen primary shards before replicas; six clients do not mean six databases.
 
 ```mermaid
 flowchart LR
-    subgraph West["us-west-2"]
-        A1["A1: read and write; own context"] --> W["Regional Redis; 3 primary shards"]
-        A2["A2: read and write; separate context"] --> W
+    subgraph US["US geographic group"]
+        subgraph West["us-west-2"]
+            A1["A1: read/write; own context"] --> W["Regional Redis; 3 primary shards"]
+            A2["A2: read/write; separate context"] --> W
+        end
+        subgraph East1["us-east-1"]
+            B1["B1: read/write; own context"] --> U1["Regional Redis; 3 primary shards"]
+        end
+        subgraph East2["us-east-2"]
+            C1["C1: read/write; own context"] --> U2["Regional Redis; 3 primary shards"]
+        end
+        W <-->|Data transport| U1
+        W <-->|Data transport| U2
+        U1 <-->|Data transport| U2
     end
-    subgraph East1["us-east-1"]
-        B1["B1: read and write; own context"] --> E1["Regional Redis; 3 primary shards"]
+    subgraph EU["EU geographic group"]
+        subgraph Ireland["eu-west-1"]
+            D1["D1: read/write; own context"] --> EW["Regional Redis; 3 primary shards"]
+        end
+        subgraph Frankfurt["eu-central-1"]
+            E1["E1: read/write; own context"] --> EC["Regional Redis; 3 primary shards"]
+        end
+        EW <-->|Data transport| EC
     end
-    subgraph East2["us-east-2"]
-        C1["C1: read and write; own context"] --> E2["Regional Redis; 3 primary shards"]
-    end
-    W <-->|Redis replication or adapter fan-out| E1
-    W <-->|Redis replication or adapter fan-out| E2
-    E1 <-->|Redis replication or adapter fan-out| E2
+    US <-->|Asynchronous cross-group data distribution| EU
 ```
 
-Only data transport connects regions in this diagram. Arrows do not imply synchronous acknowledgment or shared client context. In independent mode they represent the configured fan-out paths, with optional durable replay.
+Data transport is Redis Active-Active replication or configured independent adapter fan-out, with durable replay optional. The diagram groups regions; it does not specify physical network routing, synchronous write acknowledgment, or cross-client context sharing. Group names do not select an acknowledgment target set. With baseline local acknowledgment, cross-group distribution is outside the write success path.
 
 ## A1 writes version 42
 
 A1 receives its write context and its own dependent local reads return 42/a proven successor or report snapshot missing. A2 has no knowledge of A1's write requirement. If the shared regional candidate has been published as 42, A2 can read 42 locally without a WAN replication wait. A1's acknowledgment does not by itself guarantee that a best-effort discovery hint was published, nor does it order every concurrent client write; A2 has no independent RYOW requirement for unknown 42.
 
-B1 and C1 each read their own regional database. Before 42 arrives and becomes a local candidate, they may return older local state or null and cannot know 42 exists. Neither waits specifically for A1's unknown version or reports it as missing. After delivery and candidate publication, each can discover 42 locally.
+B1, C1, D1, and E1 each read their own regional database. Before 42 arrives and becomes a local candidate, they may return older local state or null and cannot know 42 exists. Neither waits specifically for A1's unknown version or reports it as missing. After delivery and candidate publication, each can discover 42 locally.
 
-If A2, B1, or C1 makes its own write, its response establishes that client's own RYOW context. A concurrent version from another client is not automatically a proven successor. Sharing a region does not combine A1 and A2 into one lineage or change the default `latest` read policy.
+If A2, B1, C1, D1, or E1 makes its own write, its response establishes that client's own RYOW context. A concurrent version from another client is not automatically a proven successor. Sharing a region does not combine A1 and A2 into one lineage or change the default `latest` read policy.
 
 ## Difference from strict geographic consistency
 
 The selected guarantee follows each caller's own context. Strict geographic would require every caller in the group, including A2, B1, and C1, to reflect completed write 42 or a later committed update for reads beginning afterward, or fail. It would not rely on A1 notifying them. Our design allows independent readers to see their local candidate without discovering an unpropagated write.
 
-These three regions belong to the reference US group. Across different geographic groups, strict geographic alone does not make foreign projections current. Authorization, expiry, integrity, infrastructure failures, and missing expected snapshots remain distinct outcomes.
+US and EU are separate geographic groups. A hypothetical strict-US guarantee would cover A1/A2/B1/C1, not automatically D1/E1. Strict-EU would cover D1/E1, not automatically US clients. Neither strict scope is selected; current reads remain latest-local + RYOW. Authorization, expiry, integrity, infrastructure failures, and missing expected snapshots remain distinct outcomes.
 
 ## Latest, exact, and any are read policies
 

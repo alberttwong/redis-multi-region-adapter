@@ -8,7 +8,9 @@ For each region, record endpoint, geographic group, Redis Software build, databa
 
 Cells and Redis targets change independently. Endpoint refresh must preserve caller context, snapshot/operation IDs, deadlines, and the selected policies. No implicit target removal, recovery change, or read-policy downgrade is permitted.
 
-A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, and C1 reads/writes `us-east-2`; each retains its own write context. A1/A2 use the same logical regional database in the example; verify their endpoints and candidate publication before assuming local visibility. Independent clients do not receive each other’s context/notifications and do not wait for unknown versions. Preserve same-caller context across regions without implying cross-device handoff.
+A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`; each retains its own write context. A1/A2 use the same logical regional database in the example; verify their endpoints and candidate publication before assuming local visibility. Independent clients do not receive each other’s context/notifications and do not wait for unknown versions. Preserve same-caller context across regions without implying cross-device handoff.
+
+Record US membership as us-west-2/us-east-1/us-east-2 and EU as eu-west-1/eu-central-1. Verify delivery/lag across groups separately. Group membership must not silently shrink all-target obligations or add a synchronous foreign-group wait to local acknowledgment.
 
 ## Handle a missing snapshot
 

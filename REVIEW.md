@@ -9,7 +9,9 @@ Use [spec.md](spec.md) as the behavior contract, [plan.md](plan.md) for scope, a
 3. **Distribution and recovery:** Active-Active writes once. Independent fan-out copies the same immutable envelope, not a repeated business mutation. Request-only refreshes on the next same-session insert/update. Enabled durable replay requires recoverable capture, expiry-safe delivery, no loops, retention, backpressure, and catch-up. All-target success verifies every captured member without timeout-driven shrinkage.
 4. **Security and operations:** verify token/caller binding, absence of assumed cross-client context sharing, generation/expiry handling, exact backend compatibility, three primary shards per database, pooling, restore, and sanitized telemetry. Require integration evidence for each supported backend/recovery combination; request-only does not require a worker.
 
-The no-communication scenario permits B1/C1 to read older local state/null before A1’s update arrives. Same-region A2 can discover A1’s published candidate without WAN replication, but does not inherit A1’s context or a strict cross-client guarantee. That is not a RYOW defect. Neither a local hint, fan-out barrier, nor snapshot hit proves global latest state or current revocation. Describe an absent expected snapshot as **snapshot missing**, not as an infrastructure failure.
+The no-communication scenario permits B1/C1/D1/E1 to read older local state/null before A1’s update arrives. Same-region A2 can discover A1’s published candidate without WAN replication, but does not inherit A1’s context or a strict cross-client guarantee. That is not a RYOW defect. Neither a local hint, fan-out barrier, nor snapshot hit proves global latest state or current revocation. Describe an absent expected snapshot as **snapshot missing**, not as an infrastructure failure.
+
+Review geographic membership (three US and two EU regions), six-client/five-database shard counts, and the actual captured acknowledgment set. Local acknowledgment must not wait for foreign groups; all-targets must not silently become origin-group-only because groups were declared.
 
 ## Findings
 

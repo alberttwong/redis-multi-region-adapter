@@ -46,6 +46,34 @@ Option A is Active-Active: write once at the origin and let Redis manage transpo
 
 B and D attempt distribution again on the next insert/update for the same session. Each write carries a complete immutable snapshot, so a successful later delivery can refresh current local state without replaying every historical snapshot. With no later write, a region can remain stale. Request-only mode does not retain a crash-surviving historical delivery obligation. A successful all-target write proves placement at acknowledgment under its contract, not permanent availability, rollback of partial copies, or strict geographic consistency.
 
+## Benefits and costs of each deployment choice
+
+These are design tradeoffs, not measured latency or cost claims. Distribution, acknowledgment, and recovery can be combined; choosing one does not choose the others.
+
+```mermaid
+flowchart TD
+    Choices["Deployment tradeoffs"] --> AA["Active-Active"]
+    AA --> AAPro["Benefit: Redis owns regional transport and conflict convergence"]
+    AA --> AACost["Cost: product-specific setup and data semantics; RYOW adapter still required"]
+    Choices --> Independent["Independent databases with adapter fan-out"]
+    Independent --> IPro["Benefit: explicit destination and delivery control; no Active-Active dependency"]
+    Independent --> ICost["Cost: own idempotency, partial outcomes, hint selection, and region lifecycle"]
+    Choices --> Local["Local acknowledgment"]
+    Local --> LPro["Benefit: remote availability does not gate write success"]
+    Local --> LCost["Cost: remote reads may wait or report snapshot missing"]
+    Choices --> All["All-target acknowledgment"]
+    All --> APro["Benefit: every captured target verifies the snapshot before success"]
+    All --> ACost["Cost: slowest target controls latency; one missing target prevents success"]
+    Choices --> Request["Request-only recovery"]
+    Request --> RPro["Benefit: no durable outbox or replay worker; next write refreshes state"]
+    Request --> RCost["Cost: idle sessions can stay stale; missed exact snapshots may remain missing"]
+    Choices --> Durable["Durable replay recovery"]
+    Durable --> DPro["Benefit: saved delivery resumes after restart without another write"]
+    Durable --> DCost["Cost: atomic capture, worker, backlog capacity, retention, and monitoring"]
+```
+
+Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies strict geographic consistency or current revocation checks.
+
 ## Version 42 when Region B is unavailable
 
 ```mermaid
@@ -90,6 +118,23 @@ flowchart TD
 ```
 
 `required` needs authenticated exact-version context; `any` never replaces protected caller context. Infrastructure, integrity, and context failures remain distinct errors rather than null or snapshot-missing results. An explicitly expired record has the separately defined expired outcome. No flow automatically falls back to an older value after freshness failure.
+
+## Benefits and costs of read policies
+
+```mermaid
+flowchart TD
+    Reads["Read-policy tradeoffs"] --> Latest["latest: default local RYOW"]
+    Latest --> LPro["Benefit: honors carried write and can return a proven newer local snapshot"]
+    Latest --> LCost["Cost: context and successor proof; may wait; no group-wide latest guarantee"]
+    Reads --> Exact["required: exact snapshot"]
+    Exact --> EPro["Benefit: deterministic retrieval of a known immutable identity"]
+    Exact --> ECost["Cost: newer snapshots cannot substitute; requested history can be missing"]
+    Reads --> Any["any: valid local candidate"]
+    Any --> APro["Benefit: no freshness wait or prior-write context needed"]
+    Any --> ACost["Cost: older state or null is allowed; does not preserve RYOW"]
+```
+
+Authorization, integrity, and expiry checks still apply to every policy. Faster-path implications above describe avoided coordination, not a promised benchmark result.
 
 Do not automatically switch reads or acknowledgment policy after a timeout. Keep operation ID, snapshot ID, target set, and selected policies in sanitized recovery evidence. Neither fan-out nor replay supplies shared strict commit ordering.
 

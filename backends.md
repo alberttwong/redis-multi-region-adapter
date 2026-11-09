@@ -1,6 +1,6 @@
 # Distribution, acknowledgment, and recovery
 
-Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
+Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices and their benefits/costs. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
 
 ## Choose distribution
 

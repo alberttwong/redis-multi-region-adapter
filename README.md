@@ -8,7 +8,7 @@ The default is **latest local + RYOW**: return locally known state that honors t
 
 ## Start here
 
-Read [intent.md](intent.md) for the goal, [consistency.md](consistency.md) for the guarantees and examples, and [decisions.md](decisions.md) for configuration diagrams. [spec.md](spec.md) is the authoritative behavior contract.
+Read [intent.md](intent.md) for the goal, [consistency.md](consistency.md) for the guarantees and examples, and [decisions.md](decisions.md) for configuration diagrams and option tradeoffs. [spec.md](spec.md) is the authoritative behavior contract.
 
 Deployment has three separate choices:
 

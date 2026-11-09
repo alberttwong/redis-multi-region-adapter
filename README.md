@@ -11,7 +11,7 @@ Design for **latest local with read-your-own-writes**, named `latest-local-ryow`
 | **Strict geographic** | All callers share one per-session ordered history within a geographic group; a read after a completed write reflects it or a later committed update. | Not covered; requires additional commit ordering, coordinated reads, fencing, and recovery. |
 | **Strict global** | The same per-session ordering guarantee spans all geographic groups. | Not covered; requires coordination across groups. |
 
-The requirement follows authenticated caller context. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
+Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
 
 ## Start here
 

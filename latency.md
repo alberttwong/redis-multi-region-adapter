@@ -50,6 +50,8 @@ Background transport still consumes resources in A–C and can increase origin q
 
 ## Read-policy model
 
+A reads/writes locally in `us-west-2`; independent B reads/writes locally in `us-east-1`. They do not communicate. Measure each client’s own protected reads separately from its reads of the other client’s asynchronously delivered data. Model B’s reads of A’s updates in the no-prior-write-context group; protected reads refer to a caller carrying context from its own writes. Do not assign A’s freshness requirement or propagation wait to B automatically.
+
 **Default latest, no prior-write context:** local candidate read and validation. There is no freshness wait, but candidate absence can return null. Do not describe this as cross-device latest discovery.
 
 **Default latest with context:** read/validate the local candidate. If it is ineligible, check the required exact identity and keep rechecking candidates plus exact identity until eligible data arrives or the deadline expires. A proven successor can satisfy the read even when the original version is missing.

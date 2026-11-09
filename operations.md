@@ -8,6 +8,8 @@ For each region, record endpoint, geographic group, Redis Software build, databa
 
 Cells and Redis targets change independently. Endpoint refresh must preserve caller context, snapshot/operation IDs, deadlines, and the selected policies. No implicit target removal, recovery change, or read-policy downgrade is permitted.
 
+Baseline client A reads/writes `us-west-2`, and client B reads/writes `us-east-1`; each retains context from its own writes. Independent B never receives A’s write context or revision notification. B’s unprotected local read may be stale/null and does not wait for unknown 42. Preserve same-caller context across regions without implying cross-device handoff.
+
 ## Handle a missing snapshot
 
 Validate context and inspect locally available state. Default `latest` rechecks both eligible successor candidates and the required exact snapshot during its bounded wait; explicit `required` checks only the exact identity. At deadline, an expected unexpired snapshot still unavailable is **snapshot missing** (`FreshnessUnavailable`, reason `snapshot_missing`). Ordinary unprotected absence may return null; explicit expiry, connectivity, authentication, integrity, and context errors remain distinct.

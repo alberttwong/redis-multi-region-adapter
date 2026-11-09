@@ -2,6 +2,8 @@
 
 Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices and their benefits/costs. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
 
+Client A reads/writes `us-west-2`; independent client B reads/writes `us-east-1`. They do not exchange context or version IDs; each keeps its own write context. Distribution transports session data through Redis/adapter paths, not write context to B. B discovers only its local candidate; A’s own context protects A’s dependent reads.
+
 ## Choose distribution
 
 ```mermaid

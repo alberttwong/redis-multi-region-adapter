@@ -50,7 +50,7 @@ Background transport still consumes resources in A–C and can increase origin q
 
 ## Read-policy model
 
-A reads/writes locally in `us-west-2`; independent B reads/writes locally in `us-east-1`. They do not communicate. Measure each client’s own protected reads separately from its reads of the other client’s asynchronously delivered data. Model B’s reads of A’s updates in the no-prior-write-context group; protected reads refer to a caller carrying context from its own writes. Do not assign A’s freshness requirement or propagation wait to B automatically.
+A1/A2 read/write locally in `us-west-2`, B1 in `us-east-1`, and C1 in `us-east-2`, without cross-client communication. Measure each client’s own protected reads separately from its discovery of another client’s updates. A1-to-A2 visibility on the shared regional database includes local candidate publication/read timing, not a WAN replication delay. B1/C1 visibility also includes regional delivery and candidate publication. Readers with no own requirement do not wait for unknown updates; protected reads refer to a caller carrying context from its own writes. Do not assign A1’s freshness requirement or propagation wait to A2/B1/C1 automatically. In the three-region example, all-target fan-out has two remote target paths from the origin; A2 is not a fourth database target.
 
 **Default latest, no prior-write context:** local candidate read and validation. There is no freshness wait, but candidate absence can return null. Do not describe this as cross-device latest discovery.
 

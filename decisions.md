@@ -60,11 +60,11 @@ Local + request-only has the least custom recovery machinery among independent o
 
 ## Version 42 when Region B is unavailable
 
-The setup is identical at every leaf: origin A in `us-west-2` has accepted 42, target B in `us-east-1` is unavailable, and the configured write deadline is finite. B is in the captured target set for all-targets presets. Partial copies are not rolled back.
+The setup is identical at every leaf: client A1 in `us-west-2` has written 42, target `us-east-1` used by B1 is unavailable, and the configured write deadline is finite. B is in the captured target set for all-targets presets. Partial copies are not rolled back.
 
 ```mermaid
 flowchart TD
-    Write["A accepts 42 in us-west-2; target us-east-1 unavailable"] --> Preset{"Which configuration preset?"}
+    Write["A1 writes 42 in us-west-2; target us-east-1 unavailable"] --> Preset{"Which configuration preset?"}
     Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=latest<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
     Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
     Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Write may succeed after recoverable capture; worker retries B"]
@@ -72,13 +72,13 @@ flowchart TD
     Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
 ```
 
-For A–C, successful acknowledgment returns context for 42. A’s later default read carrying its own context returns 42/a proven successor, waits, or reports **snapshot missing**. Independent B has no communication from A and no context for 42. B can return local 41/null while delivery is incomplete, without knowing 42 exists.
+For A–C, successful acknowledgment returns context for 42. A1’s later default read carrying its own context returns 42/a proven successor, waits, or reports **snapshot missing**. Independent B1/C1 have no context from A1 and can return older local state/null while delivery is incomplete. Same-region A2 can discover A1’s published local candidate without a WAN wait but has no inherited freshness requirement.
 
 D–E do not issue normal successful-write context for an uncertain outcome. Authenticated recovery may identify the pending snapshot while preserving that status. A later successful update never retroactively acknowledges the old write. The next diagram applies to a caller’s own valid write requirements regardless of transport preset. B’s independent reads have no requirement for A’s unknown version.
 
 ## Read configuration and outcomes
 
-Independent reader B receives no A-to-B context transfer or write notification. B uses the no-prior-write-context leaf for A’s updates; protected leaves apply to a caller carrying its own known requirement. `distribution`, `acknowledgment`, and `recovery` remain whichever A–E preset was chosen; they are not silently changed by a read. The leaves below show the effective `readPolicy` and the request inputs that determine each result. Absence and expiry checks assume valid authorization and integrity; invalid/lost expected context, corruption, connectivity, and authentication failures are distinct errors.
+A1, A2, B1, and C1 share no application context or notifications. An independent client with no own prior-write requirement uses the no-context leaf for another client’s updates; protected leaves apply to a caller carrying its own known requirement. `distribution`, `acknowledgment`, and `recovery` remain whichever A–E preset was chosen; they are not silently changed by a read. The leaves below show the effective `readPolicy` and the request inputs that determine each result. Absence and expiry checks assume valid authorization and integrity; invalid/lost expected context, corruption, connectivity, and authentication failures are distinct errors.
 
 ```mermaid
 flowchart TD
@@ -108,104 +108,103 @@ No millisecond values are estimated yet: regional client-side latency distributi
 
 These TypeScript snippets illustrate the **proposed API**. No SDK, `createSessionStore` implementation, import package, or executable example exists yet. Endpoint values and authenticated context transport come from deployment/middleware integration. Provision Redis Software 8.x with three primary data shards per regional database; shard count is not an adapter setting.
 
-### Configure independent fan-out: preset B
+### Configure four clients across three regions: preset B
 
 ```ts
 const targets = {
-  "us-west-2": regionAEndpoint,
-  "us-east-1": regionBEndpoint,
+  "us-west-2": westEndpoint,
+  "us-east-1": east1Endpoint,
+  "us-east-2": east2Endpoint,
 };
 
 const configuration = {
   distribution: "independent",
   acknowledgment: "local",
   recovery: "request-only",
-  readPolicy: "latest", // Store default: latest local + RYOW.
+  readPolicy: "latest",
   targets,
 };
 
-const sessionsInRegionA = createSessionStore({
-  ...configuration,
-  localRegion: "us-west-2",
-});
-
-const sessionsInRegionB = createSessionStore({
-  ...configuration,
-  localRegion: "us-east-1",
-});
+// A1 and A2 share the west regional database, but not application context.
+const sessionsA1 = createSessionStore({ ...configuration, localRegion: "us-west-2" });
+const sessionsA2 = createSessionStore({ ...configuration, localRegion: "us-west-2" });
+const sessionsB1 = createSessionStore({ ...configuration, localRegion: "us-east-1" });
+const sessionsC1 = createSessionStore({ ...configuration, localRegion: "us-east-2" });
 ```
 
-This selects **preset B**. To select C, change `recovery` to `"durable-replay"`; select D by changing `acknowledgment` to `"all-targets"`; select E by changing both. Replay needs validated capture/worker configuration in addition to these illustrative fields. Active-Active preset A instead uses `distribution: "active-active"` and `acknowledgment: "local"`, omits application `recovery`, and requires provisioned Active-Active participants; it is not obtained by changing just the distribution field in the independent example.
+This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and no application recovery setting.
 
-### Client A writes and reads in us-west-2
+Three clients' regions mean three regional databases in this example: nine primary shards before replicas. Adding A2 does not add another regional database or three more shards.
+
+### Each client reads its own acknowledged write
 
 ```ts
 const sessionId = "session-123";
-const operationId = crypto.randomUUID(); // Create once; reuse on retry.
-
-const write = await sessionsInRegionA.put(
+const operationIdA1 = crypto.randomUUID(); // Create once; reuse on retry.
+const writeA1 = await sessionsA1.put(
   sessionId,
   { selectedProfile: "kids" },
-  operationId,
+  operationIdA1,
 );
 
-// Middleware saves the successful write context for dependent reads.
-const current = await sessionsInRegionA.get(sessionId, {
-  context: write.context,
-});
-// Omitted policy uses the configured "latest" default.
-// Return the written version or a proven local successor;
-// otherwise wait within the deadline, then report "snapshot missing".
-```
+// A1 middleware saves its own context. Policy defaults to latest.
+await sessionsA1.get(sessionId, { context: writeA1.context });
 
-The server issues the actual immutable version identity; 42 in the diagrams is an explanatory label. Do not manufacture context or assume a UUID sorts versions. Partial/uncertain write results do not issue normal successful-write context. Subsequent writes in a lineage carry the middleware's current context through the proposed fourth `put` argument.
-
-### Independent client B reads and writes in us-east-1
-
-`readPolicy` configures the store default; per-call `policy` overrides it. A and B do not exchange context or version IDs. B therefore cannot explicitly require A’s unknown 42. The protected A examples below use A’s own context. B can also write and then protect its own local reads, as shown afterward.
-
-```ts
-// Independent B: no knowledge of A's acknowledged write.
-// Default latest returns a valid local candidate, perhaps 41, or null.
-await sessionsInRegionB.get(sessionId);
-
-// B can explicitly accept any valid local version without freshness waiting.
-await sessionsInRegionB.get(sessionId, { policy: "any" });
-
-// A can carry A's own write context: latest allows a proven successor.
-await sessionsInRegionA.get(sessionId, {
-  policy: "latest",
-  context: write.context,
-});
-
-// A can instead require exactly the identity in A's write context.
-await sessionsInRegionA.get(sessionId, {
+// A1 may explicitly require exactly its written version instead.
+await sessionsA1.get(sessionId, {
   policy: "required",
-  context: write.context,
+  context: writeA1.context,
 });
 ```
 
-No code transfers A's context to B. Calling `required` without valid known-version context is a context error, not a way to discover the newest write. If B later writes, it receives context for its own acknowledged write.
+The actual version identity is issued by the proposed protocol; 42 is an explanatory label, not a global counter. Subsequent writes in one lineage use the middleware's current context as the proposed fourth `put` argument. Partial/uncertain outcomes do not issue normal successful-write context.
 
-B’s own write/read pair uses a separate context; no A-to-B exchange occurs:
+### Independent reads do not receive A1's context
 
 ```ts
-const operationIdB = crypto.randomUUID(); // Reuse for retries of this B write.
-const writeB = await sessionsInRegionB.put(
-  sessionId,
-  { selectedProfile: "standard" },
-  operationIdB,
-);
+// A2 reads the shared west database, but has no context from A1.
+// It can discover 42 after local candidate publication, without a WAN wait.
+await sessionsA2.get(sessionId);
 
-// Default latest honors B's own acknowledged write in us-east-1.
-await sessionsInRegionB.get(sessionId, { context: writeB.context });
+// B1 and C1 use their own regional candidates: older state/null is allowed
+// while A1's version is still propagating or has not become their candidate.
+await sessionsB1.get(sessionId);
+await sessionsC1.get(sessionId);
+
+// Explicit any also permits older local state/null without freshness waiting.
+await sessionsB1.get(sessionId, { policy: "any" });
 ```
 
-A continues reading `us-west-2` with A’s context. B’s write is not assigned a global revision or assumed to succeed A’s write; independent histories require the existing successor proof. This topology does not change `readPolicy: "latest"`, the local acknowledgment baseline, or the need to select independent recovery explicitly.
+These no-context calls assume the client has no own protected requirement yet. They do not discard context from that client's previous writes. Same-region placement alone does not prove that A1's best-effort discovery hint was published or establish strict cross-client ordering.
 
-For protected `latest` and `required` reads, unavailable expected data is reported as **snapshot missing** after bounded waiting. Default latest rechecks eligible successors while waiting; required checks only the exact identity. Infrastructure, integrity, expiry, and context errors remain distinct. Omitting context because required middleware state was lost is not a valid first read or an automatic downgrade.
+### A2, B1, and C1 can each write and retain separate context
 
-In request-only mode, the next same-session insert/update distributes **only its latest version** to the configured targets; earlier versions need not be resent. Strict geographic/global latest and a general at-least-version policy are outside this proposed API.
+```ts
+const operationIds = {
+  a2: crypto.randomUUID(), b1: crypto.randomUUID(), c1: crypto.randomUUID(),
+}; // Retain these IDs for retries.
+
+const writeA2 = await sessionsA2.put(
+  sessionId, { selectedProfile: "a2-choice" }, operationIds.a2,
+);
+const writeB1 = await sessionsB1.put(
+  sessionId, { selectedProfile: "b1-choice" }, operationIds.b1,
+);
+const writeC1 = await sessionsC1.put(
+  sessionId, { selectedProfile: "c1-choice" }, operationIds.c1,
+);
+
+// Each middleware retains only its own client's context.
+await sessionsA2.get(sessionId, { context: writeA2.context });
+await sessionsB1.get(sessionId, { context: writeB1.context });
+await sessionsC1.get(sessionId, { context: writeC1.context });
+```
+
+Keep each generated operation ID stable when retrying its write; generate a new ID only for a new logical write. The client versions above belong to separate histories, not an automatically ordered global sequence. A1's future reads retain A1's context independently of the other writes.
+
+Default latest returns the caller's required version or a proven successor; it rechecks eligible successors during bounded waiting. Explicit required accepts only the exact identity. If expected data stays unavailable, report **snapshot missing**. Context, expiry, integrity, and infrastructure errors remain distinct. Calling required without a known valid requirement cannot discover another client's unknown write.
+
+The topology changes no defaults. Request-only distributes only the latest version on the next insert/update for the same session; earlier versions need not be resent. Strict geographic/global latest and a general at-least-version policy remain outside the API. See [consistency.md](consistency.md) for the topology diagram.
 
 ## Benefits and costs of read policies
 

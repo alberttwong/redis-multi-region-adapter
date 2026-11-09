@@ -30,6 +30,7 @@ Read policies are `latest` by default, explicit `required` for one exact version
 ## Supporting documents
 
 - [backends.md](backends.md): distribution, acknowledgment, and recovery obligations.
+- [latency.md](latency.md): p99 estimation by configuration, read path, and outcome.
 - [validation.md](validation.md): requirements mapped to proposed acceptance scenarios.
 - [plan.md](plan.md): implementation order, proposed paths, and completion evidence.
 - [operations.md](operations.md): deployment, failure handling, and monitoring.

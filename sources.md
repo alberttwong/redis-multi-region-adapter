@@ -19,6 +19,7 @@ Product references previously checked on 2026-11-09:
 - [Redis Software releases](https://redis.io/docs/latest/operate/rs/release-notes/rs-8-0-releases/): product build and database compatibility version are separate checks.
 - [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/): convergence and causal ordering do not establish a destination's current freshness.
 - [Replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/): primary/replica replication is not synchronization between independent writable databases.
+- [Benchmarking](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/) and [latency diagnosis](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/): measurement guidance for the planning model in latency.md; no project benchmark results (checked 2026-11-09).
 - [WAIT](https://redis.io/docs/latest/commands/wait/) and [transactions](https://redis.io/docs/latest/develop/using-commands/transactions/): do not supply the proposed geographic strict protocol.
 
 No exact-build support matrix, deployed configuration, vendor approval of a strict protocol, or measured service levels have been obtained. Snapshot/context schemas, fan-out, and workers are proposed application design.

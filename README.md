@@ -8,7 +8,7 @@
 
 Consider a session created in the US just before the user's next request reaches Europe. Before that update reaches Europe, a local read may return null or an older session on either backend. The adapter lets the application read only locally or search a configured group for a valid value within a deadline. Available can find a session in another region, while still allowing an older response to win.
 
-Deployment cost is another consideration. In the five-region example, the adapter can use Redis Active-Active across all five regions or one independent Redis cluster per region. Compared with five separate deployments each containing one primary and four passive replicas, either topology may be more infrastructure-efficient. Actual savings depend on equivalent capacity, throughput, and HA requirements. One primary with four replicas total across five regions is a different alternative: it already has five copies, but concentrates writes in one region and retains [replication lag](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) for regional reads.
+Across five regions, the adapter supports Redis Active-Active or independent Redis clusters. Either approach may require less infrastructure than five separate deployments, each with one primary and four replicas. Actual savings depend on comparable capacity, throughput, and high-availability requirements.
 
 Actual savings depend on equivalent capacity and HA requirements, network traffic, and operational costs. Active-Active includes additional native capabilities; independent clusters shift more responsibility to the application.
 

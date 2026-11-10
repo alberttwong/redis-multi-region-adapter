@@ -17,7 +17,7 @@ These settings answer different questions; selecting a read policy does not sele
 | Decision | Options | Default / constraint |
 | --- | --- | --- |
 | **Read strategy** | `available` or `local` | **Available**. Linearizable variants below require future custom protocols. |
-| **Read-history guarantee** | `monotonic: false` or proposed `true` on Local/Available | **Off**. On requires automatic caller history and trustworthy state-order validation. |
+| **Read-history guarantee** | **Off** (`monotonic: false`) or **On** (`monotonic: true`, proposed), on Local/Available | **Off** (`monotonic: false`). On requires automatic caller history and trustworthy state-order validation. |
 | **Read scope** | Configured geographic group or explicit global group | Available uses the local region's configured group, including local; allowed request overrides are explicit. Local contacts only local. |
 | **Write distribution** | Redis Active-Active or adapter fan-out to independent clusters | Backend must be selected; neither deployment is assumed. |
 | **Write acknowledgment** | `local`, or `all-targets` for independent clusters | **Local**. All-targets verifies every captured write target; read groups do not shrink that set. |

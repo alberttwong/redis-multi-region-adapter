@@ -16,11 +16,11 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 **Read behavior**
 
-| Behavior | Result | Implementation status |
-| --- | --- | --- |
-| **Local** / `local` | Read only the local cluster; return valid data or null. Redis Active-Active handles propagation, or the adapter handles it for independent clusters. | Proposed explicit option; no freshness guarantee. |
-| **Available** / `available` | Query every cluster in the selected group concurrently, **including local**. Return the first valid non-null value; return null when all replies are null or the deadline expires without a value. | **Default.** Remote null replies do not end the race while other requests are pending. |
-| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | Deferred and unsupported; requires a separately designed coordination protocol. |
+| Behavior | Result | Freshness guaranteed? | Implementation status |
+| --- | --- | --- | --- |
+| **Local** / `local` | Read only the local cluster; return valid data or null. Redis Active-Active handles propagation, or the adapter handles it for independent clusters. | **No.** Local data may be stale. | Proposed explicit option. |
+| **Available** / `available` | Query every cluster in the selected group concurrently, **including local**. Return the first valid non-null value; return null when all replies are null or the deadline expires without a value. | **No.** The first non-null value may be stale. | **Default.** Remote null replies do not end the race while other requests are pending. |
+| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | **Yes.** Reflect writes completed before the read begins, within that scope. | Deferred and unsupported; requires a separately designed coordination protocol. |
 
 Neither Local nor Available guarantees the newest value or read-your-own-writes. Available chooses the first value, not the first reply if that reply is null. It may return older data even when another cluster has newer data. Timeout-null means no value was obtained within the deadline, not proof that the key is absent everywhere.
 

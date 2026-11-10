@@ -2,11 +2,11 @@
 
 **Read questions**
 
-1. **Local:** Does my local cluster have a value?
-2. **Available (default):** Does any cluster in my group have a value?
-3. **Optional monotonic guarantee:** Can I read without going backward from what I have already seen?
-4. **Linearizable over Active-Active:** Does this read reflect writes completed before it began, using Active-Active plus coordination?
-5. **Linearizable over Coordinated:** Does this read reflect writes completed before it began, using independent clusters plus coordination?
+1. **Read scope:** Should the read look only locally, across a geographic group, or across all regions?
+2. **Read history:** May successive reads go backward, or must they preserve what the caller has already seen?
+3. **Freshness:** May the read return any valid value, or must it reflect writes completed before it began?
+4. **Coordination backend (proposed):** If linearizable reads are required, should the protocol use Active-Active or independent clusters?
+5. **Read deadline:** How long may the read wait, and does reaching the deadline return null or an error under the chosen guarantee?
 
 **Write questions**
 
@@ -15,7 +15,7 @@
 8. **Linearizable commit (proposed):** Is this write committed in one real-time order with all participating reads and writes within scope?
 9. **Missed delivery:** Does Redis retry delivery, or can it remain incomplete until another write to the same session?
 
-The [Read behavior tables](#read-behavior) answer questions 1–5; [Distribution](#distribution) answers question 6; [Write behavior](#write-behavior) answers questions 7–8; [Recovery](#recovery) answers question 9. Linearizable reads and commits require matching future custom protocols.
+The [Read behavior section](#read-behavior) answers questions 1–5, with the tables comparing strategies and guarantees; [Distribution](#distribution) answers question 6; [Write behavior](#write-behavior) answers questions 7–8; [Recovery](#recovery) answers question 9. Linearizable reads and commits require matching future custom protocols.
 
 **Available reads by default, with monotonic off.** Redis Multi-Region Adapter is a proposed adapter for Redis Software 8.x across regional databases. It separates where reads look, how writes reach other regions, and which guarantees require coordination.
 
@@ -23,18 +23,18 @@ The [Read behavior tables](#read-behavior) answer questions 1–5; [Distribution
 
 ## Choose the behavior
 
-The chooser summarizes the detailed tables in the same order: reads, distribution, write acknowledgment/commit, and delivery recovery. Question numbers connect each choice to the list above. Scope, deadlines, and the native causal flag are supporting configuration.
+The chooser summarizes the detailed tables in the same order: reads, distribution, write acknowledgment/commit, and delivery recovery. Question numbers connect each choice to the list above. Read scope and deadlines have their own questions; the native causal flag remains supporting backend configuration.
 
 | Decision | Question | Options | Default / constraint |
 | --- | --- | --- | --- |
-| **Read strategy** | 1–2, 4–5 | **Local** (`local`), **Available** (`available`), or future **Linearizable over Active-Active** (`linearizable`) / **Linearizable over Coordinated** (`linearizable-coordinated`) | **Available**. Local/Available are the proposed baseline; both Linearizable variants are unimplemented custom protocols with their named backends. |
-| **Read-history guarantee** | 3 | **Off** (`monotonic: false`) or **On** (`monotonic: true`, proposed), on Local/Available | **Off** (`monotonic: false`). On needs automatic caller-history enforcement. Linearizable already implies non-regression for sequential same-key operations within scope. |
-| **Read scope** | Supporting setting | Local cluster; configured geographic group; explicit global group | Local contacts only local. Available uses the local region's configured group, including local, with validated allowed overrides. Future linearizable coordination scope must be defined by its protocol. |
-| **Read deadline** | Supporting setting | A finite deployment-configured budget; proposed `readDeadlineMs` for the Available group race | **No default duration selected.** One shared budget for the entire race. Local and stronger guarantees retain their documented timeout/error semantics. |
+| **Read strategy** | 1, 3–4 | **Local** (`local`), **Available** (`available`), or future **Linearizable over Active-Active** (`linearizable`) / **Linearizable over Coordinated** (`linearizable-coordinated`) | **Available**. Local/Available are the proposed baseline; both Linearizable variants are unimplemented custom protocols with their named backends. |
+| **Read-history guarantee** | 2 | **Off** (`monotonic: false`) or **On** (`monotonic: true`, proposed), on Local/Available | **Off** (`monotonic: false`). On needs automatic caller-history enforcement. Linearizable already implies non-regression for sequential same-key operations within scope. |
+| **Read scope** | 1 | Local cluster; configured geographic group; explicit global group | Local contacts only local. Available uses the local region's configured group, including local, with validated allowed overrides. Future linearizable coordination scope must be defined by its protocol. |
+| **Read deadline** | 5 | A finite deployment-configured budget; proposed `readDeadlineMs` for the Available group race | **No default duration selected.** One shared budget for the entire race. Local and stronger guarantees retain their documented timeout/error semantics. |
 | **Write distribution** | 6 | **Redis-managed** replication for Active-Active; **Adapter fan-out** for independent clusters | Backend must be selected; neither deployment is assumed. Read groups do not change write targets. |
 | **Native causal consistency** | Supporting setting | **Off** or **On** for Active-Active | Backend configuration, not a read policy; no project-selected flag default. Same-key causal ordering does not supply caller monotonicity or linearizability. |
 | **Write acknowledgment** | 7 | **Local acknowledgment** (`local`) or **All-target acknowledgment** (`all-targets`, independent only) | **Local** for the baseline. All-targets verifies every captured write target and does not establish linearizability. |
-| **Commit guarantee** | 8, paired with 4–5 | Baseline acknowledgment semantics, or a future **Linearizable commit protocol** over either named backend | Baseline adds no custom linearizable commit protocol. Linearizable requires matching coordinated reads and writes; it is not an extra implemented acknowledgment setting. |
+| **Commit guarantee** | 8, paired with 3–4 | Baseline acknowledgment semantics, or a future **Linearizable commit protocol** over either named backend | Baseline adds no custom linearizable commit protocol. Linearizable requires matching coordinated reads and writes; it is not an extra implemented acknowledgment setting. |
 | **Delivery recovery** | 9 | **No background repair** for independent clusters; **Redis-managed** for Active-Active | Derived from the backend. No separate recovery selector or application replay worker. Future linearizable protocols must additionally define commit recovery. |
 
 A linearizable option is a read **and write** protocol commitment. Selecting it cannot retain unconstrained baseline writes. Monotonic-on and both Linearizable variants must be rejected until implemented; none is supplied simply by enabling native Active-Active causal consistency. See [decisions.md](decisions.md) for configuration examples and deployment tradeoffs.

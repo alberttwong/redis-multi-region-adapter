@@ -9,7 +9,7 @@ The production default is **Available** (`available`); **Local** (`local`) is ex
 | How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
 | How is a value read? | Local; Available (default) | The base strategy selects one local candidate or a concurrent group race. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
-| Is stronger ordering required? | Monotonic on/off modifier for Local/Available; Linearizable over either named backend | The modifier prevents caller read regression without changing the source scope; Linearizable targets real-time freshness. |
+| Is stronger ordering required? | Monotonic on/off modifier for Local/Available; Linearizable over either named backend | Off supplies no caller read-order guarantee; on prevents same-key caller read regression without changing the source scope or creating a global order; Linearizable targets real-time freshness. |
 
 Neither supported read behavior provides RYOW, newest-value selection, or quorum agreement. Available can return a stale first value; timeout-null means no value arrived in time.
 
@@ -27,11 +27,11 @@ Both Linearizable implementations are rated **slow++** for reads and writes in t
 | --- | --- | --- |
 | Local | Does local have a value? | No read-history/freshness floor. |
 | Available | Does any group member have a value? | First valid non-null value, including local; no freshness/history floor. |
-| Optional monotonic guarantee (proposed) | Can I read without going backward from what I have seen? | Same or proven later state than the caller's last tracked successful read, on either backend. |
+| Optional monotonic guarantee (proposed) | Can I read without going backward from what I have seen? | **Last-observed freshness:** same or proven later state than the caller's last tracked successful read, on either backend; no latest-write or time-age bound. |
 | Linearizable over Active-Active | Does this read reflect completed writes? | Real-time order/freshness per key in scope, via a custom protocol over Active-Active. |
 | Linearizable over Coordinated | Does this read reflect completed writes? | The same guarantee, via a custom protocol over independent clusters. |
 
-After observing 42, Monotonic rejects older 41 but may still return 42 when newest 43 is elsewhere. It needs automatic caller read-history tracking and an accepted ordering/proof relation on both backends. With Local it only searches/rechecks local state; with Available it filters the group race. It waits/fails if an established floor cannot be honored; Available's deadline-null rule must not silently weaken it. Successful reads with the modifier on establish its floor, not unread writes or untracked off-reads. Turning it off permits base-strategy reads without lowering the retained floor. No Session/RYOW read policy is restored.
+After observing 42, Monotonic rejects older 41 but may still return 42 when newest 43 is elsewhere. It needs automatic caller read-history tracking and an accepted ordering/proof relation on both backends. With Local it only searches/rechecks local state; with Available it filters the group race. It provides a last-observed freshness floor, while linearizability requires real-time freshness. It waits/fails if an established floor cannot be honored; Available's deadline-null rule must not silently weaken it. Successful reads with the modifier on establish its floor, not unread writes or untracked off-reads. Turning it off permits base-strategy reads without lowering the retained floor. No Session/RYOW read policy is restored.
 
 Native Active-Active causal consistency remains an optional backend setting. It preserves same-key causal dependencies as data propagates, but can leave a region behind and does not ensure a caller's later regional read meets its previous observed floor. It is not a public read option or a custom causal implementation workstream. See [backend settings](backends.md#backend-causal-consistency-setting).
 

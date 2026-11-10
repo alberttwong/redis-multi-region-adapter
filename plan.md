@@ -1,24 +1,22 @@
-# Plan: multi-region session adapter
+# Plan: Local and Available adapter
 
-Date: 2026-11-09. Status: proposed implementation plan for the agreed RYOW target.
+Date: 2026-11-09. Status: production implementation proposed; Available is default.
 
-## Starting point and dependencies
+## Starting point
 
-The repository contains design documents and an [experimental Python/AWS/Terraform latency spike](spike/README.md). The production SDK language, client, middleware, and CI remain unselected. The paths below are logical production proposals; spike commands and executable paths are documented separately. Resolve blockers in [sources.md](sources.md), especially lineage sequencing, successor proof, context transport, and durability.
+The repository contains design documents and a legacy [Python/AWS/Terraform spike](spike/README.md). Its old read controls and measurements do not implement the new group-racing Available behavior. Production SDK language, client, middleware, and CI remain unselected. Paths below are proposals.
 
 ## Order of work
 
-1. **Finalize the contract.** Review spec.md, choose backend/acknowledgment/recovery combinations, and agree payload size, deadlines, clock-skew policy, context lifetime, retention, and service levels. Do not infer a durable-replay default.
-2. **Provision representative environments.** Add `infra/README.md` and configuration for the pinned Redis Software 8.x builds, three primary shards per regional database, replicas, persistence, and endpoints. Validate V01 for each supported mode.
-3. **Implement common primitives.** Add `src/config/`, `src/clients/`, `src/topology/`, and `src/records/`: validated configuration, pooled connections, immutable full envelopes, identity/digest checks, generation/expiry, and typed outcomes.
-4. **Implement context and lineage.** Add `src/context/` and `src/middleware/`. Prove write serialization and response ordering; implement protected context issuance for the same caller across requests/regions. Use A1/A2 in us-west-2, B1 in us-east-1, C1 in us-east-2, D1 in eu-west-1, and E1 in eu-central-1, with separate contexts and explicit US/EU membership. Validate group metadata separately from acknowledgment targets. Do not build or assume cross-client handoff. Cover V02, V06, V08–V10, and V18.
-5. **Implement distribution before claiming regional progress.** Add `src/distribution/` for independent fan-out and next-write refresh. If enabled, add `src/outbox/` and replay-worker deployment with reviewed atomic capture, per-target application, expiry, capacity, and catch-up. Active-Active uses native transport. Cover V21–V23.
-6. **Implement read policies.** Add `src/strategies/session/` and `src/strategies/available/`: default Session candidate selection/proof, internal exact-snapshot lookup, explicit Available reads, bounded wait loops that recheck eligible successors, cancellation, and snapshot-missing outcomes. Cover the remaining contract cases including V24–V25 and V27–V28.
-7. **Verify and measure.** Add `tests/contracts/`, `tests/integration/`, `tests/faults/`, and `benchmarks/`. Run each applicable scenario on real instances of every supported configuration. Publish sanitized evidence and numeric performance results, with a single verification entry point and CI.
-8. **Rehearse operations.** Replace proposed procedures in operations.md with actual staging-tested commands; update CLAUDE.md. Validate restore, partial-outcome reconciliation, topology changes, and rollback without weakening RYOW.
+1. Finalize [spec.md](spec.md), backend/acknowledgment/recovery combinations, candidate/conflict rules, allowed read groups/overrides, deadlines, concurrency, expiry, and service levels. Session context/RYOW automation is removed from scope.
+2. Pin Redis Software 8.x builds, commands, clients, three primaries per regional database plus replicas, persistence, and endpoints. Keep provisioning and benchmark authorization separate from implementation work.
+3. Add `src/config/`, `src/clients/`, `src/topology/`, and `src/records/`: pooled connections, immutable identity/content/expiry, valid local candidate lookup, group membership including local, and captured epochs/targets.
+4. Add `src/distribution/` for idempotent independent fan-out and next-write refresh. If selected, add `src/outbox/` and a bounded replay worker with atomic capture, original expiry, per-target completion, and backpressure. Active-Active uses native transport. Preserve local versus all-target acknowledgment semantics.
+5. Add `src/reads/local/` and `src/reads/available/`. Local performs one regional lookup. Default Available concurrently starts every group request including local, accepts the first valid non-null value, continues after null/failed attempts, returns null on all-null or deadline, and cleans up losers without delaying the winner. There is no public historical/version selector or client write-context path.
+6. Add contract, integration, fault, and load tests following [validation.md](validation.md). Exercise first-null/later-value, stale-first wins, local wins, all-null, deadline-null, failed members, group changes, cancellation, and resource bounds against real deployments.
+7. Measure Local and Available separately, including winning region, outcome rates, pending/failed attempts, pool load, and complete end-to-end histograms. Follow [latency.md](latency.md); historical spike p99 is not a prediction for the new fan-out path.
+8. Rehearse expiry, uncertain-write reconciliation, restart/restore, target admission, configuration changes, rollback, and cleanup. Replace proposed operations with verified commands and sanitized evidence.
 
-## Risks and completion
+## Risks and limits
 
-Highest risks are lost/rolled-back context, falsely claiming a successor relationship, missing durable capture when replay is enabled, and treating a later write as delivery of an older exact snapshot. None is solved by three shards or an eventually replicated hint.
-
-No automatic remote read fallback, global latest discovery, strict authority, or cross-session transaction is planned. Keep this plan and the specification synchronized when scope changes. Completion needs applicable scenario evidence and accepted service levels, not merely a clean build. Documentation checks in the PR do not constitute application or infrastructure validation.
+Key risks are returning null after only one miss, waiting for all members after a value wins, dispatching sequentially, accepting invalid values, unbounded fan-out/loser work, falsely claiming fresh/latest state, and shrinking write targets because a read group was selected. Neither supported read guarantees RYOW or linearizability. Linearizable coordination, current cross-device revocation, and cross-session transactions remain separate/deferred designs.

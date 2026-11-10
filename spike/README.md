@@ -2,7 +2,7 @@
 
 This is an **experimental measurement harness**, not the production session SDK or a strict geographic-consistency implementation. It deploys Redis Software **8.2.6-25**, the latest release verified on 2026-11-09, and requests database compatibility **8.8**. The [official download selector](https://redis.io/downloads/#Redis_Software) and [release notes](https://redis.io/docs/latest/operate/rs/release-notes/rs-8-2-releases/rs-8-2-6-25/) identify that build. The installer checksum is pinned in deployment variables; do not use a floating latest image for results.
 
-The production design now names its public reads `session` (default, RYOW) and `available`, with exact-version lookup internal to Session enforcement. This spike retains legacy experiment inputs: `latest` approximates Session selection, `any` approximates Available, and `required` probes exact-version plumbing. These are harness controls, not the production public API. Actors manage context explicitly; automatic production middleware is not implemented. Historical run reports retain their original policy labels.
+The revised production API has `local` (one regional lookup) and default `available` (concurrently race all selected group members, including local; first non-null value, or null on all-null/deadline). Session reads have been removed from production scope. This legacy spike retains `latest`, `any`, and `required` controls and explicitly managed actor context; **it does not implement the new group-racing Available policy**. Historical run reports and runtime controls retain their original meanings. New production reads need separate implementation and measurement.
 
 ## Topology
 

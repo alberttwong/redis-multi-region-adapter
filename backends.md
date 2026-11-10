@@ -2,11 +2,11 @@
 
 Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices and their benefits/costs. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
 
-A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`. US contains the three US regions; EU contains the two EU regions. All retain separate own-write context. A1/A2 share the example west regional database; the two local clients do not add a target or share a lineage. Fan-out targets databases/regions, not clients. It transports session data, not context between clients.
+A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`. US contains the three US regions; EU contains the two EU regions. Production reads carry no caller write-dependency context. A1/A2 share the example west regional database; the two local clients do not add a target or become separate regional targets. Fan-out targets databases/regions, not clients. It transports stored values between databases.
 
 ## Choose distribution
 
-Available reads and Session (RYOW) support either backend below. Future linearizable modes within geographic/global scopes would use Active-Active as the planned replication base, with a separately designed authority/commit protocol. Active-Active provides eventual convergence, not linearizability by itself. Independent-cluster linearizable designs are outside the planned scope; see [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. A possible linearizable overlay is unvalidated and deferred; independent-cluster linearizable designs are outside planned scope. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ Target scope is explicit: US-only verification is not verification of every glob
 
 The next insert/update **for the same session** sends only its latest version to all configured targets. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.
 
-Default `session` can return 43 to a caller requiring 42 only when 43 is a proven successor. An internal lookup of 42 may remain absent; report **snapshot missing** only when no eligible snapshot satisfies Session by the deadline. A write for another session does not refresh this one. A later successful write never retroactively acknowledges an uncertain earlier write.
+Local and Available do not require an exact historical identity or caller context. A write for another session does not refresh this session. A later successful write never retroactively acknowledges an uncertain earlier write.
 
 ## Durable replay: retain delivery obligations
 
@@ -53,12 +53,12 @@ Before successful acknowledgment, origin acceptance must bind the snapshot and r
 
 Track delivery per target, retry with bounded backoff, preserve original expiry, and avoid resurrecting expired state. Retain obligations until the accepted delivery/recovery policy permits removal. Apply backpressure or reject writes before capacity pressure destroys promised obligations. Origin storage loss beyond the agreed durability contract can still lose data or work; replay is not unlimited durability.
 
-Replay can finish a timed-out all-target write, but the original outcome remains uncertain until reconciled with its original IDs. Never issue normal successful-write context merely because copies might eventually arrive.
+Replay can finish a timed-out all-target write, but the original outcome remains uncertain until reconciled with its original IDs. Never report the original write as successful merely because copies might eventually arrive.
 
 ## Discovery hints, membership, and restore
 
-At a destination, apply the immutable snapshot before publishing its discovery hint. Do not roll the hint back within a proven lineage. Incomparable lineages need a deterministic candidate-selection rule, not a fabricated global revision order. Protected reads validate the candidate against caller context regardless of delivery order.
+At a destination, apply the immutable snapshot before publishing its discovery hint. Use a deterministic, backend-supported candidate/conflict rule and reject conflicting identity/content. A publication timestamp or larger numeric label does not establish global freshness. Local and Available validate candidates without caller write-context checks.
 
 With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Request-only does not promise historical backfill: admit targets for future latest-version writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
 
-Restored targets do not become fresh merely because their endpoint is healthy. Revalidate eligibility and let protected reads enforce snapshot/lineage checks. Recovery must preserve configuration epochs and never reinterpret a missing expected snapshot as authorization or an ordinary eventual miss.
+Restored targets do not become fresh merely because their endpoint is healthy. Revalidate identity, expiry, and candidate publication. Preserve configuration epochs and distinguish internal expected-copy verification from public Local/Available null results. Endpoint health does not establish current authorization.

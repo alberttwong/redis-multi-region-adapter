@@ -44,4 +44,4 @@ The oracle checks caller-local RYOW, not global latest-state linearizability. Fo
 
 ## Agent configuration checks
 
-Replay tasks involving stale hits, lost context, response reordering, expiry versus missing data, unsupported Redis capabilities, and accidental strict-consistency claims when instructions change. No eval runner or enforcement hooks are installed. Documentation checks are reported in the PR. None of these application scenarios has been implemented or executed yet.
+Replay tasks involving stale hits, lost context, response reordering, expiry versus missing data, unsupported Redis capabilities, and accidental strict-consistency claims when instructions change. No eval runner or enforcement hooks are installed. Documentation checks are reported in the PR. The [spike protocol tests](spike/tests/test_protocol.py) exercise a subset of read/version/error behavior. They do not constitute this production acceptance suite; deployment measurements are recorded separately.

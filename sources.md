@@ -50,3 +50,7 @@ Assign the responsible owners; no names or approvals are inferred.
 5. **Delivery:** choose CI/provisioning, artifact reviewers, production release authority, and rollout/rollback checks.
 
 For each resolved decision, record artifact revision, reviewer, date, rationale, and review/commit link. Document generation and PR submission do not constitute technical or production acceptance.
+
+## AWS spike implementation
+
+The user requested a real AWS spike using Terraform, selected AWS profile 735486936198_SuperUserAccess, supplied a Redis license, explicitly authorized its storage in an AWS Secrets Manager destination, and requested the latest Redis Enterprise/Software version. The official download selector and release notes identified 8.2.6-25; the spike pins that installer and requests database version 8.8. Secret values are not repository artifacts. See spike/README.md for the experimental implementation, topology, cost basis, and limitations. This does not change the production consistency target or select an independent recovery preset.

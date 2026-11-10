@@ -4,7 +4,7 @@ Date: 2026-11-09. Status: proposed implementation plan for the agreed RYOW targe
 
 ## Starting point and dependencies
 
-The repository has design documents only. Language, client, middleware, provisioning, and CI are unselected. The paths below are logical proposals; add file extensions and executable commands once the stack is chosen. Resolve blockers in [sources.md](sources.md), especially lineage sequencing, successor proof, context transport, and durability.
+The repository contains design documents and an [experimental Python/AWS/Terraform latency spike](spike/README.md). The production SDK language, client, middleware, and CI remain unselected. The paths below are logical production proposals; spike commands and executable paths are documented separately. Resolve blockers in [sources.md](sources.md), especially lineage sequencing, successor proof, context transport, and durability.
 
 ## Order of work
 

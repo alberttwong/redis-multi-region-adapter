@@ -1,6 +1,6 @@
 # Estimating p99 latency
 
-Status: planning model only. No adapter measurements, millisecond estimates, or performance SLOs exist yet. Presets A–E and read policies refer to [decisions.md](decisions.md). This model does not select a deployment preset.
+Status: planning model with an [experimental AWS measurement harness](spike/README.md). The [2026-11-09 baseline](spike/reports/aws-baseline-20261109.md) records real run results with sample counts and configuration; no production SLO or strict-consistency guarantee is inferred. Presets A–E and read policies refer to [decisions.md](decisions.md). This model does not select a deployment preset.
 
 ## Measure the right operation
 

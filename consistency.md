@@ -1,6 +1,6 @@
 # Consistency and regional client behavior
 
-The selected contract is **Session (RYOW)**, named `session`. This explains the design; [spec.md](spec.md) defines exact behavior. No adapter has been implemented.
+The selected contract is **Session (RYOW)**, named `session`. This explains the design; [spec.md](spec.md) defines exact behavior. An [experimental latency spike](spike/README.md) exercises a subset of this contract; no production adapter has been implemented.
 
 ## Separate convergence, read consistency, and scope
 

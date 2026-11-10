@@ -1,0 +1,210 @@
+{
+  "date": "2026-11-09",
+  "redis_software": "8.2.6-25",
+  "installer_url": "https://redis-enterprise-software-downloads.s3.amazonaws.com/8.2.6/redislabs-8.2.6-25-jammy-amd64.tar",
+  "installer_sha256": "27dad5afff38d98da3db869023394ba74f746a127eaf20cf50910949a4903118",
+  "measured_code_archive_sha256": "4ff3dd1b91de15736e1496c7b6b7d8eff4995aae023343cff3c94eb82fab8a0b",
+  "instance_types": {
+    "redis": "m6i.xlarge",
+    "runner": "c6i.large"
+  },
+  "ami_ids": {
+    "eu-central-1": {
+      "ami_id": "ami-093faf52ba1e451a2",
+      "runner_ami_id": "ami-04bbcae8eccec8bce"
+    },
+    "eu-west-1": {
+      "ami_id": "ami-0f154da50afcb0b09",
+      "runner_ami_id": "ami-0b27c8d40b81d75ef"
+    },
+    "us-east-1": {
+      "ami_id": "ami-05221e3867c5db247",
+      "runner_ami_id": "ami-08b275ac6cc5dbefb"
+    },
+    "us-east-2": {
+      "ami_id": "ami-0451fa70c8ca29175",
+      "runner_ami_id": "ami-096d6538c463eb1db"
+    },
+    "us-west-2": {
+      "ami_id": "ami-01f4f843eb16b1673",
+      "runner_ami_id": "ami-0346507e743a5ffc6"
+    }
+  },
+  "database_inspection": [
+    {
+      "region": "us-west-2",
+      "databases": [
+        {
+          "uid": 2,
+          "name": "spike-active-active",
+          "port": 12001,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        },
+        {
+          "uid": 1,
+          "name": "spike-independent",
+          "port": 12000,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        }
+      ]
+    },
+    {
+      "region": "us-east-2",
+      "databases": [
+        {
+          "uid": 1,
+          "name": "spike-independent",
+          "port": 12000,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        },
+        {
+          "uid": 2,
+          "name": "spike-active-active",
+          "port": 12001,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        }
+      ]
+    },
+    {
+      "region": "eu-west-1",
+      "databases": [
+        {
+          "uid": 2,
+          "name": "spike-active-active",
+          "port": 12001,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        },
+        {
+          "uid": 1,
+          "name": "spike-independent",
+          "port": 12000,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        }
+      ]
+    },
+    {
+      "region": "us-east-1",
+      "databases": [
+        {
+          "uid": 2,
+          "name": "spike-active-active",
+          "port": 12001,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        },
+        {
+          "uid": 1,
+          "name": "spike-independent",
+          "port": 12000,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        }
+      ]
+    },
+    {
+      "region": "eu-central-1",
+      "databases": [
+        {
+          "uid": 1,
+          "name": "spike-independent",
+          "port": 12000,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        },
+        {
+          "uid": 2,
+          "name": "spike-active-active",
+          "port": 12001,
+          "status": "active",
+          "shards_count": 3,
+          "replication": true,
+          "redis_version": "8.8",
+          "data_persistence": "aof",
+          "aof_policy": "appendfsync-always",
+          "proxy_policy": "all-nodes"
+        }
+      ]
+    }
+  ],
+  "data_tls": false,
+  "active_active_and_independent_share_hardware": true,
+  "post_run_instances": [
+    {
+      "region": "us-west-2",
+      "instances": 4,
+      "state": "stopped"
+    },
+    {
+      "region": "eu-central-1",
+      "instances": 4,
+      "state": "stopped"
+    },
+    {
+      "region": "us-east-2",
+      "instances": 4,
+      "state": "stopped"
+    },
+    {
+      "region": "us-east-1",
+      "instances": 4,
+      "state": "stopped"
+    },
+    {
+      "region": "eu-west-1",
+      "instances": 4,
+      "state": "stopped"
+    }
+  ],
+  "retained_resources": "EBS volumes, S3 artifacts, Secrets Manager secrets, and Terraform infrastructure retained"
+}

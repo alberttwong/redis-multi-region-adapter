@@ -1,0 +1,18 @@
+# Local deployment state and credentials
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.auto.tfvars
+**/*.auto.tfvars.json
+**/terraform.tfvars
+**/terraform.tfvars.json
+**/crash.log
+**/.venv/
+**/__pycache__/
+**/*.pyc
+spike/results/
+spike/local/
+.env
+.env.*
+!*.example

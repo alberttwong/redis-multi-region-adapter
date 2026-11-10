@@ -20,7 +20,7 @@ The tables separate convergence, read consistency, and cluster-group scope. Even
 | **Session (RYOW)** / `session` | Reflect the caller's own acknowledged write or a proven successor. Other callers may see older state. | Either backend, plus protected caller context, successor proof, and local wait/error handling. Active-Active alone does not ensure RYOW across regions. | **Selected default:** `session`. |
 | **Linearizable** / `linearizable` (deferred) | One ordered history per session key, respecting real-time operation order, for every caller in the selected scope. | Active-Active as the planned replication base, plus a separate authority/commit protocol, coordinated reads, fencing, and recovery. | Deferred; no protocol is specified or implemented. Independent-cluster linearizable designs are outside planned scope. |
 
-For Session and linearizable reads, unavailable required state causes waiting or an explicit failure, not stale success. Session names this project's RYOW behavior; it does not imply MongoDB's full causal consistency guarantees. These are the project's guarantee labels, not an exhaustive consistency taxonomy.
+For Session and linearizable reads, unavailable required state causes waiting or an explicit failure, not stale success. Session is a proposed SDK behavior: middleware must automatically retain write context and attach it to dependent reads. The current spike explicitly manages context and does not implement that SDK automation. Session names this project's RYOW behavior; it does not imply MongoDB's full causal consistency guarantees. These are the project's guarantee labels, not an exhaustive consistency taxonomy.
 
 **Cluster-group scope for a linearizable guarantee**
 
@@ -33,7 +33,7 @@ Group membership is topology metadata. Neither linearizable scope is supported i
 
 Active-Active is the planned infrastructure direction for future linearizable behavior to reduce custom replication code. It is not a theoretical prerequisite for linearizability and does not supply it alone. See the [infrastructure comparison](consistency.md#infrastructure-by-consistency-level).
 
-Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Available reads are an explicit alternative. Exact-version lookup is internal plumbing for Session reads, not a public read policy. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
+Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Available reads are an explicit alternative. Exact-version lookup is internal plumbing for Session reads, not a public read policy. Coverage describes the production design; the experimental AWS spike exercises a subset without establishing a production guarantee. See [consistency.md](consistency.md).
 
 ## Start here
 
@@ -49,6 +49,10 @@ Without durable replay, the next insert/update for the same session sends its la
 
 Public read policies are `session` (default) and `available`. Session supplies RYOW, not the latest completed write across all callers. `linearizable` describes a deferred behavior and is rejected as unsupported in this phase. Expected snapshot/version identifiers stay in protected middleware context; exact-version lookup is internal plumbing.
 
+## AWS latency spike
+
+[spike/README.md](spike/README.md) documents the Terraform deployment, experimental regional runners, preset A–E measurements, and reproduction/teardown steps. It targets the latest verified Redis Software build, pinned to 8.2.6-25. The production session SDK and strict geographic protocol remain unimplemented.
+
 ## Supporting documents
 
 - [backends.md](backends.md): distribution, acknowledgment, and recovery obligations.
@@ -62,6 +66,6 @@ Public read policies are `session` (default) and `available`. Session supplies R
 
 ## Status
 
-Design documents only, updated 2026-11-09. No adapter, worker, infrastructure, application tests, or enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
+Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
 
 The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

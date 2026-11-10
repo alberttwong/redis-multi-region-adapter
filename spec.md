@@ -24,6 +24,12 @@ The caller lineage is a middleware-managed chain of sequential writes and their 
 
 Convergence, read consistency, and cluster-group scope are distinct. Explicit `available` has no freshness guarantee; default `session` enforces RYOW when protected caller context is present. Linearizability would require shared ordering per session key, respecting real-time operation order, for all callers in a selected scope. “Linearizable geographic” and “linearizable global” mean geographic-group and all-region scopes of that same deferred guarantee. Group membership alone does not enforce linearizability, restrict RYOW movement, or change acknowledgment participants. Linearizable scopes are explanatory concepts, not supported read-policy settings.
 
+## Session automation and current implementation
+
+Session is intended to remove version handling from business code: middleware retains acknowledged write context, attaches it to later requests from that caller, and invokes the adapter's protected-read checks automatically. That requires a defined context transport and lifecycle; selecting a policy name alone does not supply the guarantee.
+
+The current experimental spike explicitly manages actor context and uses legacy `latest`/`any`/`required` policy names. It is not the proposed production SDK and does not implement automatic middleware context handling. A caller manually passing a version is exercising the underlying mechanism, not receiving the planned automatic integration. The public policies below describe the production design; exact-version selection stays internal there.
+
 ## Public read policies
 
 The API supports two read policies. Session is the default; Available is an explicit opt-in. A2, B1, C1, D1, and E1 have no context for A1’s writes. Without their own prior-write requirement, Session performs local discovery and cannot require unknown version 42.

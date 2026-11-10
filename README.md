@@ -12,6 +12,8 @@ One active region with four passive read replicas can also be sufficient when on
 
 **Infrastructure cost is part of the choice.** Five regional copies require memory and compute in five regions, plus configured HA replicas, persistence/backups, replication traffic, and operations. Active-Active has [additional sizing overhead](https://redis.io/docs/latest/operate/rs/databases/active-active/planning/) supporting its broader capabilities. The adapter adds read fan-out traffic and, for independent clusters, write fan-out and application maintenance. Compare deployment sizing and licensing or service quotes alongside engineering and operations costs; a reduced feature set does not guarantee lower total cost. A smaller read group alone does not reduce stored copies or write targets.
 
+The adapter can offer a more infrastructure-efficient alternative to maintaining **five separate deployments, each with one primary and four passive replicas**, by using one independent Redis cluster per region. That comparison is **25 logical database copies versus five**, before accounting for sharding and any additional local HA replicas. One primary with four replicas total across five regions already has five copies; it is a different comparison. Actual savings depend on comparable dataset sizes, throughput, capacity, and HA requirements, as reflected in [Redis database sizing](https://redis.io/docs/latest/operate/rs/databases/memory-performance/memory-limit/). Fewer copies do not imply a fivefold cost reduction, and savings come with fewer native capabilities and greater application responsibility.
+
 ## What does it solve?
 
 The proposed adapter makes session access explicit across either backend:

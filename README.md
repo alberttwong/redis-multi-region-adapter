@@ -1,4 +1,4 @@
-# Multi-region session consistency
+# Redis multi-region write and read data consistency
 
 1. **Local:** Does my local cluster have a value?
 2. **Available (default):** Does any cluster in my group have a value?

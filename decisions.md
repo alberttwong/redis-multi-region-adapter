@@ -1,10 +1,10 @@
 # Deployment and write-policy decisions
 
-Status: design options; no implementation. Read policy remains **latest-local-ryow** by default, with explicit exact-version and any-version reads. Redis Software 8.x uses three primary data shards per regional database, plus replicas.
+Status: design options; no implementation. Public read policy defaults to **`session` (RYOW)**, with explicit `available` reads. Exact-version lookup is internal plumbing; linearizable reads are deferred. Redis Software 8.x uses three primary data shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
-**Selected:** the default read policy is `latest` with local RYOW. Redis Software 8.x and three primary shards per regional database are the platform target. Explicit `required` and `any` reads are also available in the design.
+**Selected:** the default read policy is `session` with RYOW. Redis Software 8.x and three primary shards per regional database are the platform target. Explicit `available` reads are also available in the design; exact-version selection is internal.
 
 **Still configurable:** distribution, independent acknowledgment, and independent recovery. A–E below are configuration presets for explaining outcomes, not a claim that one deployment preset has been chosen. `local` is the baseline acknowledgment; `all-targets` is opt-in. Independent recovery must be chosen explicitly.
 
@@ -16,19 +16,19 @@ Each leaf contains the complete configuration and the resulting behavior. Preset
 
 ```mermaid
 flowchart TD
-    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=latest<br/><br/>Origin success; Redis distributes; remote reads can wait or report missing"]
+    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=session<br/><br/>Origin success; Redis distributes; remote reads can wait or report missing"]
     Start -->|independent| Ack{"acknowledgment?"}
     Ack -->|local| LocalRecovery{"recovery?"}
-    LocalRecovery -->|request-only| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Origin success; next same-session write distributes only its latest version"]
-    LocalRecovery -->|durable-replay| C["Preset C<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Origin success after recoverable capture; worker finishes missing copies"]
+    LocalRecovery -->|request-only| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=session<br/><br/>Origin success; next same-session write distributes only its latest version"]
+    LocalRecovery -->|durable-replay| C["Preset C<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=session<br/><br/>Origin success after recoverable capture; worker finishes missing copies"]
     Ack -->|all-targets| AllRecovery{"recovery?"}
-    AllRecovery -->|request-only| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
-    AllRecovery -->|durable-replay| E["Preset E<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Success only after every target verifies; worker retains unfinished delivery"]
+    AllRecovery -->|request-only| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=session<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
+    AllRecovery -->|durable-replay| E["Preset E<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=session<br/><br/>Success only after every target verifies; worker retains unfinished delivery"]
 ```
 
-All five presets default to the same read contract. Either explicit read override can be used with any preset, subject to its context requirements. Active-Active plus adapter `all-targets` is not specified in this phase. Durable replay is optional in independent mode and is not implied by local acknowledgment.
+All five presets default to the same read contract. The explicit `available` override can be used with any preset; it never reduces stored Session context. Active-Active plus adapter `all-targets` is not specified in this phase. Durable replay is optional in independent mode and is not implied by local acknowledgment.
 
-B and D attempt distribution again on the next insert/update for the same session. They send only its latest version, without resending earlier versions. With no later write, a region can remain stale. All-target verification proves placement at acknowledgment under its contract, not permanent availability, atomic visibility, or strict geographic consistency.
+B and D attempt distribution again on the next insert/update for the same session. They send only its latest version, without resending earlier versions. With no later write, a region can remain stale. All-target verification proves placement at acknowledgment under its contract, not permanent availability, atomic visibility, or linearizable geographic consistency.
 
 ## Benefits and costs of each deployment choice
 
@@ -56,7 +56,7 @@ flowchart TD
     Durable --> DCost["Cost: atomic capture, worker, backlog capacity, retention, and monitoring"]
 ```
 
-Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies strict geographic consistency or current revocation checks.
+Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
 
 ## Version 42 when Region B is unavailable
 
@@ -65,11 +65,11 @@ The setup is identical at every leaf: client A1 in `us-west-2` has written 42, t
 ```mermaid
 flowchart TD
     Write["A1 writes 42 in us-west-2; target us-east-1 unavailable"] --> Preset{"Which configuration preset?"}
-    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=latest<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
-    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
-    Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>Write may succeed after recoverable capture; worker retries B"]
-    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=latest<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
-    Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=latest<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
+    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=session<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
+    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=session<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
+    Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=session<br/><br/>Write may succeed after recoverable capture; worker retries B"]
+    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=session<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
+    Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=session<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
 ```
 
 For A–C, successful acknowledgment returns context for 42. A1’s later default read carrying its own context returns 42/a proven successor, waits, or reports **snapshot missing**. Independent B1/C1 have no context from A1 and can return older local state/null while delivery is incomplete. Same-region A2 can discover A1’s published local candidate without a WAN wait but has no inherited freshness requirement.
@@ -83,15 +83,12 @@ A1, A2, B1, and C1 share no application context or notifications. An independent
 ```mermaid
 flowchart TD
     Read["Read using chosen deployment preset A-E"] --> Policy{"readPolicy?"}
-    Policy -->|latest: default| Context{"Valid prior-write context for 42?"}
-    Context -->|No: genuine first read| First["readPolicy=latest<br/>context=none<br/><br/>Return valid local candidate or null; eventual local discovery"]
+    Policy -->|session: default| Context{"Valid prior-write context for 42?"}
+    Context -->|No: genuine first read| First["readPolicy=session<br/>context=none<br/><br/>Return valid local candidate or null; eventual local discovery"]
     Context -->|Yes| Match{"Local candidate is 42 or a proven successor?"}
-    Match -->|Yes| Current["readPolicy=latest<br/>context=42<br/>candidate=42 or proven successor<br/><br/>Return candidate; advance context safely"]
-    Match -->|No| LatestWait["readPolicy=latest<br/>context=42<br/>candidate=older, absent, or incomparable<br/><br/>Recheck eligible successors and exact 42 until deadline; return eligible state or snapshot missing"]
-    Policy -->|required: exact version| Exact{"Valid exact context for 42; exact 42 present?"}
-    Exact -->|Yes| ExactHit["readPolicy=required<br/>requestedVersion=42<br/>exact42=present<br/><br/>Return exactly 42; never substitute 43 or lower protected context"]
-    Exact -->|No| ExactMiss["readPolicy=required<br/>requestedVersion=42<br/>exact42=missing<br/><br/>Wait only for exact 42; report snapshot missing at deadline"]
-    Policy -->|any: explicit opt-in| Any["readPolicy=any<br/>freshnessRequirement=none<br/><br/>Return valid local candidate or null; older state allowed; preserve protected context"]
+    Match -->|Yes| Current["readPolicy=session<br/>context=42<br/>candidate=42 or proven successor<br/><br/>Return candidate; advance context safely"]
+    Match -->|No| LatestWait["readPolicy=session<br/>context=42<br/>candidate=older, absent, or incomparable<br/><br/>Recheck eligible successors and exact 42 until deadline; return eligible state or snapshot missing"]
+    Policy -->|available: explicit opt-in| Any["readPolicy=available<br/>freshnessRequirement=none<br/><br/>Return valid local candidate or null; older state allowed; preserve protected context"]
 ```
 
 An unknown explicit policy is rejected rather than defaulted. A request carrying no context because expected context was lost is also rejected; the first-read leaf is not a silent downgrade path. Explicit expiry uses the separate expired outcome. A higher numeric label alone is not successor proof.
@@ -100,7 +97,7 @@ An unknown explicit policy is rejected rather than defaulted. A request carrying
 
 Use the [p99 estimation model](latency.md) to turn a selected configuration into a client-visible latency estimate. A/B acknowledge the origin path, C additionally requires recoverable capture, and D/E wait for the slowest required remote verification path. These are critical-path descriptions, not measured latency rankings.
 
-Read p99 also depends on policy and context: any/latest-without-context are local candidate paths, while protected latest/required can include residual propagation and polling waits. Request-only misses may wait for a future same-session write; exact missing history may never arrive. Always report timeout/error/missing rates beside p99 and avoid adding component p99 values or averaging regional p99s.
+Read p99 also depends on policy and context: Available/Session-without-context are local candidate paths, while protected Session can include residual propagation and polling waits. Request-only misses may wait for a future same-session write; exact missing history may never arrive. Always report timeout/error/missing rates beside p99 and avoid adding component p99 values or averaging regional p99s.
 
 No millisecond values are estimated yet: regional client-side latency distributions, workload/load, capture design, persistence, arrival timing, and deadlines are still needed. See latency.md for formulas, assumptions, the all-target tail effect, and the measurement workflow.
 
@@ -128,7 +125,7 @@ const configuration = {
   distribution: "independent",
   acknowledgment: "local",
   recovery: "request-only",
-  readPolicy: "latest",
+  readPolicy: "session",
   targets,
   groups, // Topology metadata; does not imply a write barrier.
 };
@@ -157,17 +154,11 @@ const writeA1 = await sessionsA1.put(
   operationIdA1,
 );
 
-// A1 middleware saves its own context. Policy defaults to latest.
-await sessionsA1.get(sessionId, { context: writeA1.context });
-
-// A1 may explicitly require exactly its written version instead.
-await sessionsA1.get(sessionId, {
-  policy: "required",
-  context: writeA1.context,
-});
+// Before this read, A1 middleware persists writeA1.context. Policy defaults to session.
+await sessionsA1.get(sessionId); // Middleware attaches its saved context.
 ```
 
-The actual version identity is issued by the proposed protocol; 42 is an explanatory label, not a global counter. Subsequent writes in one lineage use the middleware's current context as the proposed fourth `put` argument. Partial/uncertain outcomes do not issue normal successful-write context.
+The actual version identity is issued by the proposed protocol; 42 is an explanatory label, not a global counter. Subsequent writes in one lineage use the middleware's current context internally (the proposed fourth `put` argument at the adapter boundary). Partial/uncertain outcomes do not issue normal successful-write context.
 
 ### Independent reads do not receive A1's context
 
@@ -183,8 +174,8 @@ await sessionsC1.get(sessionId);
 await sessionsD1.get(sessionId);
 await sessionsE1.get(sessionId);
 
-// Explicit any also permits older local state/null without freshness waiting.
-await sessionsB1.get(sessionId, { policy: "any" });
+// Explicit Available also permits older local state/null without freshness waiting.
+await sessionsB1.get(sessionId, { policy: "available" });
 ```
 
 These no-context calls assume the client has no own protected requirement yet. They do not discard context from that client's previous writes. Same-region placement alone does not prove that A1's best-effort discovery hint was published or establish strict cross-client ordering.
@@ -214,31 +205,29 @@ const writeE1 = await sessionsE1.put(
   sessionId, { selectedProfile: "e1-choice" }, operationIds.e1,
 );
 
-// Each middleware retains only its own client's context.
-await sessionsA2.get(sessionId, { context: writeA2.context });
-await sessionsB1.get(sessionId, { context: writeB1.context });
-await sessionsC1.get(sessionId, { context: writeC1.context });
-await sessionsD1.get(sessionId, { context: writeD1.context });
-await sessionsE1.get(sessionId, { context: writeE1.context });
+// Before these reads, each middleware persists only its own write response context.
+// Each get attaches that saved context internally; business code selects no version.
+await sessionsA2.get(sessionId);
+await sessionsB1.get(sessionId);
+await sessionsC1.get(sessionId);
+await sessionsD1.get(sessionId);
+await sessionsE1.get(sessionId);
 ```
 
 Keep each generated operation ID stable when retrying its write; generate a new ID only for a new logical write. The client versions above belong to separate histories, not an automatically ordered global sequence. A1's future reads retain A1's context independently of the other writes.
 
-Default latest returns the caller's required version or a proven successor; it rechecks eligible successors during bounded waiting. Explicit required accepts only the exact identity. If expected data stays unavailable, report **snapshot missing**. Context, expiry, integrity, and infrastructure errors remain distinct. Calling required without a known valid requirement cannot discover another client's unknown write.
+Default Session returns the caller's required version or a proven successor; it rechecks eligible successors during bounded waiting. Exact identity lookup is internal to Session enforcement, not a public policy. If expected data stays unavailable, report **snapshot missing**. Context, expiry, integrity, and infrastructure errors remain distinct. Selecting Session without prior-write context cannot discover another client's unknown write.
 
-The topology changes no defaults. Request-only distributes only the latest version on the next insert/update for the same session; earlier versions need not be resent. Strict geographic/global latest and a general at-least-version policy remain outside the API. See [consistency.md](consistency.md) for the topology diagram.
+The topology changes no defaults. Request-only distributes only the latest version on the next insert/update for the same session; earlier versions need not be resent. Linearizable reads within geographic/global scopes and a general at-least-version policy remain outside the API. See [consistency.md](consistency.md) for the topology diagram.
 
 ## Benefits and costs of read policies
 
 ```mermaid
 flowchart TD
-    Reads["Read-policy tradeoffs"] --> Latest["latest: default local RYOW"]
+    Reads["Read-policy tradeoffs"] --> Latest["session: default RYOW"]
     Latest --> LPro["Benefit: honors carried write and can return a proven newer local snapshot"]
     Latest --> LCost["Cost: context and successor proof; may wait; no group-wide latest guarantee"]
-    Reads --> Exact["required: exact snapshot"]
-    Exact --> EPro["Benefit: deterministic retrieval of a known immutable identity"]
-    Exact --> ECost["Cost: newer snapshots cannot substitute; requested history can be missing"]
-    Reads --> Any["any: valid local candidate"]
+    Reads --> Any["available: valid local candidate"]
     Any --> APro["Benefit: no freshness wait or prior-write context needed"]
     Any --> ACost["Cost: older state or null is allowed; does not preserve RYOW"]
 ```
@@ -247,6 +236,6 @@ Authorization, integrity, and expiry checks still apply to every policy. Faster-
 
 Do not automatically switch reads or acknowledgment policy after a timeout. Keep operation ID, snapshot ID, target set, and selected policies in sanitized recovery evidence. Neither fan-out nor replay supplies shared strict commit ordering.
 
-A next write of 43 can make B's current state available without filling every historical gap. If exact 42 is absent, report **snapshot missing**. Default latest with context 42 may return 43 only when it is a proven successor; otherwise its required snapshot remains missing. An unrelated session write does not refresh this session. An uncertain all-target write keeps its original outcome; a later successful update does not retroactively acknowledge it.
+A next write of 43 can make B's current state available without filling every historical gap. If exact 42 and all eligible successors are absent, report **snapshot missing**. Default Session with context 42 may return 43 only when it is a proven successor; otherwise its required snapshot remains missing. An unrelated session write does not refresh this session. An uncertain all-target write keeps its original outcome; a later successful update does not retroactively acknowledge it.
 
 For protocol obligations and open implementation choices, see [backends.md](backends.md), [spec.md](spec.md), and [validation.md](validation.md).

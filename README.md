@@ -1,19 +1,39 @@
 # Multi-region session consistency
 
-Design for **latest local with read-your-own-writes**, named `latest-local-ryow`, on **Redis Software 8.x**. Each regional database has **three primary data shards**, with replica shards additional. The per-region interpretation remains a sizing assumption to confirm.
+Design for **Session reads with read-your-own-writes (RYOW)**, named `session`, on **Redis Software 8.x**. Each regional database has **three primary data shards**, with replica shards additional. The per-region interpretation remains a sizing assumption to confirm.
 
 ## Consistency
 
-| Consistency level | What it guarantees | Redis infrastructure and application responsibilities | Coverage in this project |
+The tables separate convergence, read consistency, and cluster-group scope. Eventual convergence can coexist with Session reads. Defining a group alone does not enforce linearizability.
+
+**How regional copies converge**
+
+| Convergence guarantee | Meaning | Coverage in this project |
+| --- | --- | --- |
+| **Eventual** | Regional values may differ during propagation, then converge when delivery completes. | Active-Active supplies replication. Independent clusters need adapter fan-out and recovery; request-only delivery can leave gaps indefinitely without a later write. |
+
+**Read behavior / consistency guarantee**
+
+| Read behavior / guarantee | Meaning | Redis infrastructure and application responsibilities | Coverage in this project |
 | --- | --- | --- | --- |
-| **Eventual** | Regional values may differ while updates propagate, then converge when delivery completes. | **Active-Active or independent regional clusters.** Active-Active provides CRDT replication and strong eventual convergence. Independent clusters need application-managed distribution and recovery to ensure delivery. | Unprotected local reads have eventual semantics. Independent request-only delivery can leave gaps indefinitely without a later write. |
-| **Read-your-own-writes (RYOW)** | A caller's dependent reads honor its acknowledged write, using carried context; unavailable required state is reported explicitly. Other callers may still see older state. | **Active-Active or independent regional clusters**, plus application-carried write context and protected-read checks. Active-Active alone does not ensure a different region has caught up to the caller's write. | **Project target: latest local + RYOW (`latest-local-ryow`).** The default returns eligible local state or waits/reports snapshot missing. |
-| **Strict geographic (group-scoped linearizability)** | All callers share one per-session ordered history within a geographic group; a read after a completed write reflects it or a later committed update. | **Active-Active as the planned replication base**, plus a separately designed group-scoped authority/commit protocol, coordinated reads, fencing, and recovery. Native Active-Active replication alone does not provide this guarantee. | Deferred; no strict protocol is specified or implemented. Independent-cluster strict designs are outside the planned scope. |
-| **Strict global (global linearizability)** | The same per-session ordering guarantee spans all geographic groups. | **Active-Active as the planned replication base**, plus a separately designed global authority/commit protocol, coordinated reads, fencing, and recovery across groups. Native Active-Active replication alone does not provide this guarantee. | Deferred; no strict protocol is specified or implemented. Independent-cluster strict designs are outside the planned scope. |
+| **Available** / `available` | Return valid local data or not found, without waiting for remote updates. May miss completed writes. | Active-Active or independent clusters; local candidate validation and access checks. | Explicit `available` policy. |
+| **Session (RYOW)** / `session` | Reflect the caller's own acknowledged write or a proven successor. Other callers may see older state. | Either backend, plus protected caller context, successor proof, and local wait/error handling. Active-Active alone does not ensure RYOW across regions. | **Selected default:** `session`. |
+| **Linearizable** / `linearizable` (deferred) | One ordered history per session key, respecting real-time operation order, for every caller in the selected scope. | Active-Active as the planned replication base, plus a separate authority/commit protocol, coordinated reads, fencing, and recovery. | Deferred; no protocol is specified or implemented. Independent-cluster linearizable designs are outside planned scope. |
 
-Active-Active is the infrastructure direction for future strict modes to avoid building regional replication and convergence ourselves; it is a project architecture choice, not a theoretical prerequisite for linearizability. Redis documents Active-Active as **strong eventual consistency**, with optional causal ordering. Neither guarantees immediate cross-region visibility after acknowledgment. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and the [infrastructure comparison](consistency.md#infrastructure-by-consistency-level).
+For Session and linearizable reads, unavailable required state causes waiting or an explicit failure, not stale success. Session names this project's RYOW behavior; it does not imply MongoDB's full causal consistency guarantees. These are the project's guarantee labels, not an exhaustive consistency taxonomy.
 
-Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
+**Cluster-group scope for a linearizable guarantee**
+
+| Scope | Covered clusters and callers | Combined guarantee |
+| --- | --- | --- |
+| **Geographic group** | A configured group, such as the three US regions or the two EU regions | **Linearizable geographic:** shared ordering within that group; other groups may lag. |
+| **Global** | All five regions across both groups | **Linearizable global:** shared ordering across all regions. |
+
+Group membership is topology metadata. Neither linearizable scope is supported in this phase. Session reads follow caller context across groups; this behavior is not restricted to a geographic group. Group names do not change acknowledgment targets.
+
+Active-Active is the planned infrastructure direction for future linearizable behavior to reduce custom replication code. It is not a theoretical prerequisite for linearizability and does not supply it alone. See the [infrastructure comparison](consistency.md#infrastructure-by-consistency-level).
+
+Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Available reads are an explicit alternative. Exact-version lookup is internal plumbing for Session reads, not a public read policy. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
 
 ## Start here
 
@@ -27,7 +47,7 @@ Deployment has three separate choices:
 
 Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
-Read policies are `latest` by default, explicit `required` for one exact version, and explicit `any` for any valid local candidate. None promises the latest completed update across all devices or regions.
+Public read policies are `session` (default) and `available`. Session supplies RYOW, not the latest completed write across all callers. `linearizable` describes a deferred behavior and is rejected as unsupported in this phase. Expected snapshot/version identifiers stay in protected middleware context; exact-version lookup is internal plumbing.
 
 ## Supporting documents
 

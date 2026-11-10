@@ -6,7 +6,7 @@ A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-e
 
 ## Choose distribution
 
-These two backend choices apply to eventual reads and the current latest-local + RYOW target. Future strict geographic/global modes would use Active-Active as the planned replication base, with an additional authority/commit protocol still to be designed and validated. Active-Active supplies strong eventual convergence, not strict ordering or immediate cross-region visibility. Independent-cluster strict modes are outside the planned scope; see [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+Available reads and Session (RYOW) support either backend below. Future linearizable modes within geographic/global scopes would use Active-Active as the planned replication base, with a separately designed authority/commit protocol. Active-Active provides eventual convergence, not linearizability by itself. Independent-cluster linearizable designs are outside the planned scope; see [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
 flowchart LR
@@ -33,7 +33,7 @@ flowchart LR
     All --> Slow["Slowest target controls latency; missing target prevents success"]
 ```
 
-Local acknowledgment is the baseline. Optional `all-targets` waits for every member captured with the operation's target-set/configuration epoch. A deadline never silently removes a participant. On partial failure, preserve IDs and report an uncertain/partial outcome; existing copies are not rolled back. Readback proves presence under its stated policy, not disk durability. Neither acknowledgment option establishes strict geographic ordering or atomic regional visibility.
+Local acknowledgment is the baseline. Optional `all-targets` waits for every member captured with the operation's target-set/configuration epoch. A deadline never silently removes a participant. On partial failure, preserve IDs and report an uncertain/partial outcome; existing copies are not rolled back. Readback proves presence under its stated policy, not disk durability. Neither acknowledgment option establishes linearizable geographic ordering or atomic regional visibility.
 
 Target scope is explicit: US-only verification is not verification of every global region. Current local acknowledgment does not wait for group peers or foreign groups. In the five-target sample, all-targets verifies all five; groups do not implicitly reduce this set. A future origin-group-only barrier with foreign asynchronous delivery requires a distinct acknowledgment-set design. Active-Active in this phase uses origin acknowledgment; an adapter verification overlay for that backend is not currently specified.
 
@@ -43,7 +43,7 @@ Target scope is explicit: US-only verification is not verification of every glob
 
 The next insert/update **for the same session** sends only its latest version to all configured targets. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.
 
-Default `latest` can return 43 to a caller requiring 42 only when 43 is a proven successor. Exact `required` 42 still reports **snapshot missing** if 42 is absent. A write for another session does not refresh this one. A later successful write never retroactively acknowledges an uncertain earlier write.
+Default `session` can return 43 to a caller requiring 42 only when 43 is a proven successor. An internal lookup of 42 may remain absent; report **snapshot missing** only when no eligible snapshot satisfies Session by the deadline. A write for another session does not refresh this one. A later successful write never retroactively acknowledges an uncertain earlier write.
 
 ## Durable replay: retain delivery obligations
 

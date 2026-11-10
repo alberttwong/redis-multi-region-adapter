@@ -14,13 +14,13 @@ Record US membership as us-west-2/us-east-1/us-east-2 and EU as eu-west-1/eu-cen
 
 ## Handle a missing snapshot
 
-Validate context and inspect locally available state. Default `latest` rechecks both eligible successor candidates and the required exact snapshot during its bounded wait; explicit `required` checks only the exact identity. At deadline, an expected unexpired snapshot still unavailable is **snapshot missing** (`FreshnessUnavailable`, reason `snapshot_missing`). Ordinary unprotected absence may return null; explicit expiry, connectivity, authentication, integrity, and context errors remain distinct.
+Validate context and inspect locally available state. Default `session` rechecks both eligible successor candidates and the required exact snapshot during its bounded wait; exact lookup is internal plumbing, not a public read policy. At deadline, if neither the expected unexpired snapshot nor a proven successor is available, the outcome is **snapshot missing** (`FreshnessUnavailable`, reason `snapshot_missing`). Ordinary unprotected absence may return null; explicit expiry, connectivity, authentication, integrity, and context errors remain distinct.
 
 No remote fetch or old-value fallback occurs automatically. A newer default-read result needs verified history evidence; its numeric label alone is insufficient. Keep genuine first reads without context separate from missing expected context.
 
 ## Independent distribution
 
-Request-only mode sends the latest version on the next insert/update for the same session. It does not retain historical delivery obligations or require manual repair as the normal flow. If 43 arrives while exact 42 never does, default latest may use proven successor 43; exact 42 reports missing. Without another write, a remote region can remain stale.
+Request-only mode sends the latest version on the next insert/update for the same session. It does not retain historical delivery obligations or require manual repair as the normal flow. If 43 arrives while exact 42 never does, default Session may use proven successor 43; the internal exact lookup of 42 remains absent, but does not fail a Session read satisfied by 43. Without another write, a remote region can remain stale.
 
 When durable replay is enabled, monitor worker health, per-target backlog, oldest undelivered work, delivery conflicts, expiry, retries, and backpressure. Rehearse atomic-capture failure, request crash, worker restart, duplicate/reordered delivery, and gap-free new-target catch-up. Do not trim work before its retention/delivery contract permits it.
 

@@ -6,7 +6,11 @@ Date: 2026-11-09. Status: consistency target agreed; detailed design proposed.
 
 A session request can move regions before its last update has propagated. The destination may hold older state or no record. Provide an in-process adapter that preserves the caller's acknowledged state without business-code polling or version comparisons.
 
-The selected contract is **latest local with read-your-own-writes (RYOW)**. The default read can use a later locally known snapshot only when its history proves it succeeds the caller's write. Otherwise it retrieves the required snapshot or reports it as missing after bounded waiting. Exact-version and any-version reads are explicit options.
+The selected contract is **Session (RYOW)**. The default read can use a later locally known snapshot only when its history proves it succeeds the caller's write. Otherwise it retrieves the required snapshot or reports it as missing after bounded waiting. Available reads are an explicit option. Expected versions and exact-snapshot lookup stay internal to Session enforcement.
+
+**Session (RYOW)**, named `session`, is the default public read behavior. It does not imply full causal consistency. **Available**, named `available`, is the explicit alternative; exact-version selection is internal plumbing, not a public policy.
+
+Convergence, read consistency, and cluster-group scope are distinct. Explicit `available` has no freshness guarantee; default `session` enforces RYOW when protected caller context is present. Linearizability would require shared per-session ordering for all callers in a selected scope. “Linearizable geographic” and “linearizable global” mean geographic-group and all-region scopes of that same deferred guarantee. Group membership alone does not enforce linearizability, restrict RYOW movement, or change acknowledgment participants. Linearizable scopes are explanatory concepts, not supported read-policy settings.
 
 ## Agreed regional clients
 
@@ -14,7 +18,7 @@ A1 and A2 both read and write in `us-west-2`. B1 reads/writes in `us-east-1`; C1
 
 A1's acknowledged write of 42 protects A1's own dependent reads. A2 may discover it through the shared regional Redis database after candidate publication, with no WAN hop, but same-region placement does not transfer A1's context or guarantee cross-client latest state. B1/C1/D1/E1 can read older local state or null until data arrives and is selected locally. Each client's own writes establish its separate RYOW requirement.
 
-The example assumes A1/A2 use the same logical regional Redis database; confirm endpoint/cell layout before implementation. Defaults remain latest-local + RYOW with local acknowledgment as baseline and independent recovery explicitly selected. See [consistency.md](consistency.md).
+The example assumes A1/A2 use the same logical regional Redis database; confirm endpoint/cell layout before implementation. Defaults remain Session (RYOW) with local acknowledgment as baseline and independent recovery explicitly selected. See [consistency.md](consistency.md).
 
 ## Platform and delivery choices
 
@@ -30,4 +34,4 @@ Developers integrate the adapter, platform engineers operate transport and datab
 
 Pass the applicable scenarios in [validation.md](validation.md), with measured targets agreed before production acceptance. Distinguish snapshot missing, ordinary eventual absence, explicit expiry, and infrastructure failure. Exclude payloads, credentials, bearer IDs, and raw context from telemetry.
 
-Strict geographic/global ordering, general cross-device latest-state discovery, cross-session transactions, and immediate cross-device revocation are outside this phase. Authorization requiring those guarantees needs a separate design. Resolve the open decisions in [sources.md](sources.md) before implementation; the user's consistency selection does not approve every proposed mechanism.
+Linearizable geographic/global ordering, general cross-device latest-state discovery, cross-session transactions, and immediate cross-device revocation are outside this phase. Authorization requiring those guarantees needs a separate design. Resolve the open decisions in [sources.md](sources.md) before implementation; the user's consistency selection does not approve every proposed mechanism.

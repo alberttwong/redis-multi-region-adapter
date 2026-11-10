@@ -23,6 +23,8 @@ The independent option retains Redis Software 8.x; it does not establish a Redis
 
 ## Fan-out and acknowledgment
 
+Both future linearizable implementations use **slow++** read and write planning ratings. This is separate from independent all-target placement, which retains its **slow+** write rating and does not establish linearizability. Actual protocol latency remains unmeasured.
+
 The [write behavior table](README.md#write-behavior) summarizes baseline local/all-target acknowledgment and future linearizable commit paths. Only `local` and independent `all-targets` are current proposed acknowledgment settings; custom rows need their own validated protocols, not an extra acknowledgment label. Available has no separate write mode.
 
 Every independent insert/update identifies its latest version and attempts delivery to all configured targets. Copies reuse its original ID, payload, digest, generation, and absolute expiry. Reapplying identical content is a no-op; conflicting identity/content is an integrity error. Copying must not repeat business-side mutations or trigger recursive re-export.

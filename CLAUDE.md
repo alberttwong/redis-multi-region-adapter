@@ -21,7 +21,7 @@ Design documents plus an experimental AWS latency spike. Start with README.md, s
 - Independent request-only refreshes the next same-session update's current version. Optional durable replay captures obligations before success. Local acknowledgment is baseline; independent all-target verifies placement, not ordering/durability.
 - Monotonic is proposed on either backend: automatically retain/transport each caller's last successful tracked read floor, accept same/proven later state, never regress it, and wait/fail rather than return older/unproven state or timeout-null when an unexpired floor exists. No latest-write or RYOW guarantee; no manual version input. Concurrency, absence/deletion/expiry, and history evidence need a protocol.
 - Causal is removed from read/write option tables and custom implementation scope. Redis's optional Active-Active causal flag remains backend configuration; it does not establish a caller's read floor or linearizability.
-- Both Linearizable variants target identical real-time per-key guarantees through custom protocols. Reject all unimplemented/removed policies and backend mismatches; no inherent speed ranking is established.
+- Both Linearizable variants use **slow++** planning ratings for reads and writes and target identical real-time per-key guarantees through custom protocols. Ratings are not measured SLOs. Reject all unimplemented/removed policies and backend mismatches; no inherent speed ranking is established.
 - Preserve IDs on uncertain-write reconciliation. Internal placement misses may be described as **snapshot missing**; public Available misses/timeouts return null.
 - Never log payloads, credentials, bearer IDs, or raw tokens.
 

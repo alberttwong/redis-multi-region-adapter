@@ -19,6 +19,8 @@ Local and Available work with Active-Active or independent regional clusters. Ac
 
 Active-Active supplies native per-key causal ordering when enabled, not linearizability. Both backends can target caller monotonicity through automatic read-history enforcement, or full linearizability through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
 
+Both Linearizable implementations are rated **slow++** for reads and writes in the planning model. This is the same provisional band on either backend, not a measured latency ranking.
+
 ## Main questions and guarantees
 
 | Behavior | Main question | Guarantee |

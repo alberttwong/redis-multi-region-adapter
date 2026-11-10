@@ -28,4 +28,4 @@ Restored/admitted targets need backend-specific readiness, integrity/expiry chec
 
 Measure Local and Available at realistic group size/load, including null/error rates, all-attempt histograms, per-target latency, pool saturation, fan-out counts, cancellations, and late work. Rehearse first-null/later-value, all-null, deadline-null, stale-first, partial endpoint failure, membership changes, and winner cleanup. Rollout/rollback must preserve the documented policy behavior; no production release automation is installed by these documents.
 
-Active-Active provides eventual convergence. Linearizable coordination and immediate cross-device revocation remain separate deferred designs; neither a racing read nor all-target placement establishes them.
+For future linearizable modes on either backend, use **slow++** for both read and write planning; record actual per-operation histograms separately rather than treating the label as an SLO. Active-Active provides eventual convergence. Linearizable coordination and immediate cross-device revocation remain separate deferred designs; neither a racing read nor all-target placement establishes them.

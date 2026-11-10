@@ -14,7 +14,7 @@ Available concurrently queries every group member including local. Return first 
 
 A stale first value is permitted. A deadline-null may occur when a value exists in a slow/unreachable cluster. Record winner, all-null, deadline-null, failed/rejected attempts, and late replies separately. Keep request-level access/configuration failures as errors. Local returns value/null for one endpoint, with infrastructure and integrity errors distinct; it has no automatic remote fallback.
 
-No caller write-context, successor proof, exact-version public read, or production Session path is required. Internal write-placement checks may still identify an expected copy as **snapshot missing**; this is not the public Available timeout contract. Keep raw payloads, bearer IDs, and credentials out of logs.
+Local/Available require no caller-history floor. Proposed Monotonic requires automatic last-successful-read history, never an explicit business-code version selector; if its established floor is unavailable, wait/fail rather than return older state or timeout-null. Session, Causal, and public exact-version read paths remain removed. Internal write-placement checks may still identify an expected copy as **snapshot missing**; this is not the public Available timeout contract. Keep raw payloads, bearer IDs, and credentials out of logs.
 
 ## Writes and recovery
 

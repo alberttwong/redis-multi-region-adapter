@@ -6,7 +6,7 @@ Status: planning model with an [experimental AWS measurement harness](spike/READ
 
 The README uses four planning bands: **fast** for a regional path, **slow** for a remote-response path, **slow+** for inter-region coordination, and **slow++** for extra sequential WAN coordination or reaching the configured deadline. These are shorthand for assumed request paths, not measured milliseconds, fixed bounds, or guaranteed rankings.
 
-Under local acknowledgment, Local and Causal over Active-Active reads/writes are provisionally fast. Available reads are provisionally slow, but local winners can be fast and no-value deadlines slow++; its baseline writes remain fast. Causal over Coordinated and both Linearizable variants provisionally use slow+ for both reads and writes, assuming inter-region coordination; their unselected protocols could add slow++ paths or optimize some operations. All-target writes add remote waits. Revisit ratings after protocol selection and real measurements.
+Under local acknowledgment, Local reads/writes are provisionally fast. Available reads are provisionally slow, but local winners can be fast and no-value deadlines slow++; its baseline writes remain fast. Monotonic and both Linearizable variants provisionally use slow+ for both reads and writes, assuming inter-region coordination; their unselected protocols could add slow++ paths or optimize some operations. All-target writes add remote waits. Revisit ratings after protocol selection and real measurements.
 
 ## Measure the right operation
 
@@ -71,11 +71,11 @@ A first null must not stop the race. A first stale value must not wait for a new
 
 Available's new group-racing behavior is not measured by the legacy spike's `latest`/`any`/`required` runs. Keep historical reports and labels intact. Collect new client-side fan-out traces at representative load before making numeric claims for this API.
 
-## Guarantee/backend variants and latency
+## Monotonic and linearizable latency
 
-Causal over Active-Active uses native causal-enabled replication and regional reads without a global freshness barrier. Local acknowledgment remains possible; causal tracking adds replication traffic/memory/performance overhead. Its ordering needs less custom code than Causal over Coordinated, which must implement causal dependency propagation/application/recovery on independent clusters. The latter can also use asynchronous replication; causal guarantees do not inherently impose synchronous WAN waits on every read/write.
+Monotonic is a proposed group search filtered against automatic caller read history. A candidate already meeting the floor may return quickly, but floor retrieval/validation, remote eligible values, or waiting for state can add latency. No acceptable state before deadline with an established unexpired floor yields an error, not Available-style null. Both backends require this enforcement; native causal ordering does not replace it. The slow+ label is provisional and may become fast or slow++ on different paths.
 
-Linearizable over Active-Active and Linearizable over Coordinated target the same real-time freshness/ordering per key with different replication backends. Both need custom coordination and validated commit/read/failure paths. Coordination may add WAN communication on reads, writes, or both. All custom slow+ ratings are provisional path assumptions, not properties of the guarantees. Protocol-specific paths could be fast or slow++ instead. No benchmark or architectural proof ranks one linearizable implementation as faster.
+Both Linearizable implementations target the same real-time per-key guarantee via different replication backends and custom protocols. Reads, writes, or both may incur WAN coordination; no benchmark ranks one implementation as faster. Redis's optional causal flag can affect replication traffic/memory/performance independently of read policy, but there is no Causal read row or custom causal protocol path in the production plan.
 
 ## Why component p99 values cannot simply be added
 

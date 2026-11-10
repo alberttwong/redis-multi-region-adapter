@@ -6,7 +6,7 @@ A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-e
 
 ## Choose distribution
 
-Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. Causal over Active-Active uses its native causal flag for same-key dependency ordering without regional catch-up. Causal over Coordinated targets that ordering through a custom protocol over independent clusters. Linearizable over Active-Active and Linearizable over Coordinated target the same real-time per-key guarantee; each needs a custom coordination protocol over its respective backend. All adapter/protocol integrations remain proposed or deferred, with no implemented freshness proof. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. Monotonic is proposed on either backend and requires automatic caller read-history tracking plus proof of acceptable state ordering. Linearizable over Active-Active and Linearizable over Coordinated target the same real-time per-key guarantee through custom protocols. Causal is no longer a read option or custom protocol workstream; Redis's native causal flag remains optional backend configuration. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ The independent option retains Redis Software 8.x; it does not establish a Redis
 
 ## Fan-out and acknowledgment
 
-The [write behavior table](README.md#write-behavior) summarizes baseline local/all-target acknowledgment and future custom causal/linearizable commit paths. Only `local` and independent `all-targets` are current proposed acknowledgment settings; custom rows need their own validated protocols, not an extra acknowledgment label. Available has no separate write mode.
+The [write behavior table](README.md#write-behavior) summarizes baseline local/all-target acknowledgment and future linearizable commit paths. Only `local` and independent `all-targets` are current proposed acknowledgment settings; custom rows need their own validated protocols, not an extra acknowledgment label. Available has no separate write mode.
 
 Every independent insert/update identifies its latest version and attempts delivery to all configured targets. Copies reuse its original ID, payload, digest, generation, and absolute expiry. Reapplying identical content is a no-op; conflicting identity/content is an integrity error. Copying must not repeat business-side mutations or trigger recursive re-export.
 
@@ -64,3 +64,7 @@ At a destination, apply the immutable snapshot before publishing its discovery h
 With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Request-only does not promise historical backfill: admit targets for future latest-version writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
 
 Restored targets do not become fresh merely because their endpoint is healthy. Revalidate identity, expiry, and candidate publication. Preserve configuration epochs and distinguish internal expected-copy verification from public Local/Available null results. Endpoint health does not establish current authorization.
+
+## Backend causal consistency setting
+
+Active-Active can enable native causal consistency to preserve causal dependencies on the same key; disabling it retains eventual convergence without that causal-order guarantee. Neither setting guarantees regional catch-up or caller monotonicity across region changes. Local/Available work with the flag on or off. Monotonic needs its own read-history enforcement on either backend; both linearizable modes need their own custom protocols. The native flag is configuration, not a public `causal` read behavior. See [Redis causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).

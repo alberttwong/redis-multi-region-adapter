@@ -8,7 +8,9 @@ Provide two production reads over regional copies: **Local** (`local`) queries o
 
 Available chooses a value by arrival time, not freshness. Either option may return stale data or miss a completed write; neither guarantees read-your-own-writes. Timeout-null is not proof that every cluster lacks the value. Keep authorization, integrity, expiry, deadlines, and per-attempt observability intact.
 
-The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. **Causal over Active-Active** uses Redis's enabled per-key causal ordering; **Causal over Coordinated** targets that same ordering through custom application coordination over independent clusters. Neither guarantees regional catch-up. **Linearizable over Active-Active** and **Linearizable over Coordinated** target the same full real-time ordering/freshness per key using different replication backends and custom coordination. Those protocols are not implemented; native Active-Active causal ordering is not a linearizable guarantee.
+Session and Causal read options have been removed. Proposed **Monotonic** (`monotonic`) asks whether a caller can read without going backward from its last tracked successful observation. It automatically retains/transports read history and rejects older or unproven state on either backend. It may miss newer writes and does not promise RYOW. The integration is unimplemented and requires state-history proofs, safe floor updates, and bounded wait/failure handling.
+
+**Linearizable over Active-Active** and **Linearizable over Coordinated** target the same real-time ordering/freshness per key through different replication backends and custom coordination. No such protocol is implemented. Native Active-Active causal consistency remains optional backend configuration, not a read behavior or a substitute for Monotonic/Linearizable enforcement.
 
 ## Topology and scope
 

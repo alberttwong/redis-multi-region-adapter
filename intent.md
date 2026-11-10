@@ -1,33 +1,27 @@
-# Intent: multi-region session consistency
+# Intent: multi-region read behavior
 
-Date: 2026-11-09. Status: consistency target agreed; detailed design proposed.
+Date: 2026-11-09. Status: default and read behaviors selected; implementation proposed.
 
-## Problem and outcome
+## Outcome
 
-A session request can move regions before its last update has propagated. The destination may hold older state or no record. Provide an in-process adapter that preserves the caller's acknowledged state without business-code polling or version comparisons.
+Provide two production reads over regional copies: **Local** (`local`) queries one local cluster; **Available** (`available`, default) concurrently queries every cluster in the selected group, including local, and returns the first valid non-null value. If all replies are null, or no value arrives before the shared deadline, Available returns null. An early null must not end the race while other members are pending.
 
-The selected contract is **latest local with read-your-own-writes (RYOW)**. The default read can use a later locally known snapshot only when its history proves it succeeds the caller's write. Otherwise it retrieves the required snapshot or reports it as missing after bounded waiting. Exact-version and any-version reads are explicit options.
+Available chooses a value by arrival time, not freshness. Either option may return stale data or miss a completed write; neither guarantees read-your-own-writes. Timeout-null is not proof that every cluster lacks the value. Keep authorization, integrity, expiry, deadlines, and per-attempt observability intact.
 
-## Agreed regional clients
+The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. Linearizable behavior is deferred and requires a separately validated coordination protocol; Active-Active alone supplies eventual convergence.
 
-A1 and A2 both read and write in `us-west-2`. B1 reads/writes in `us-east-1`; C1 in `us-east-2`; D1 in `eu-west-1`; E1 in `eu-central-1`. The three US regions form the US group; the two EU regions form the EU group. All clients are independent and do not exchange write context, version IDs, notifications, or shared latest-version metadata. Redis replication or adapter fan-out still transports session data.
+## Topology and scope
 
-A1's acknowledged write of 42 protects A1's own dependent reads. A2 may discover it through the shared regional Redis database after candidate publication, with no WAN hop, but same-region placement does not transfer A1's context or guarantee cross-client latest state. B1/C1/D1/E1 can read older local state or null until data arrives and is selected locally. Each client's own writes establish its separate RYOW requirement.
+A1/A2 share a regional database in `us-west-2`; B1 uses `us-east-1`, C1 `us-east-2`, D1 `eu-west-1`, and E1 `eu-central-1`. US groups the three US regions and EU the two EU regions. Five regional databases with three primary shards each mean fifteen primaries before replicas. Confirm actual cell/endpoint placement.
 
-The example assumes A1/A2 use the same logical regional Redis database; confirm endpoint/cell layout before implementation. Defaults remain latest-local + RYOW with local acknowledgment as baseline and independent recovery explicitly selected. See [consistency.md](consistency.md).
+Available selects the local region's configured read group, or a validated explicit override, always including local. A configured global group can include all five. Local never fans out. Clients do not exchange application context; database transport carries data between regions. Group membership defines Available's read targets without enforcing ordering or changing write acknowledgment participants.
 
-## Platform and delivery choices
+## Distribution choices
 
-Use Redis Software 8.x with three primary data shards per regional database, plus separately sized replicas. Offer Active-Active or independent regional databases with adapter-managed fan-out. No fixed session home cluster or request-path session service is required.
+Support Redis Software 8.x Active-Active or independent regional clusters with adapter fan-out. Active-Active owns replication/recovery; independent mode requires it in the application. Local acknowledgment is baseline; independent `all-targets` explicitly verifies the captured full target set. Independent recovery is separately chosen as request-only next-write refresh or optional durable replay. Without another write or retained replay obligation, an idle target may remain stale.
 
-Groups describe geographic membership, not a new consistency default or an implicit acknowledgment barrier. Under local acknowledgment, distribution to the foreign group remains asynchronous. Independent mode supports local or all-target acknowledgment, separately from request-only or durable-replay recovery. Request-only sends the next insert/update's latest version; it does not require manual repair or preserve every historical version. Durable replay is optional and can finish saved delivery work without a new write.
+A1 writing 42 does not make either read behavior wait for 42. Local reads the regional candidate; Available can obtain a value from any group member, including local, and an older first value can win. All-target write placement does not create linearizability. See [consistency.md](consistency.md), [backends.md](backends.md), and [spec.md](spec.md).
 
-Reference geography is US (`us-east-1`, `us-east-2`, `us-west-2`) and EU (`eu-west-1`, `eu-central-1`). Membership is configurable. Cells are application deployment units and do not automatically correspond to Redis databases.
+## Delivery and limits
 
-## Users, constraints, and success
-
-Developers integrate the adapter, platform engineers operate transport and databases, and service/security owners set durability, expiry, and authorization policies. Middleware propagates protected context for the same caller across cells and regions. There is no automatic remote read fallback or silent downgrade to stale reads.
-
-Pass the applicable scenarios in [validation.md](validation.md), with measured targets agreed before production acceptance. Distinguish snapshot missing, ordinary eventual absence, explicit expiry, and infrastructure failure. Exclude payloads, credentials, bearer IDs, and raw context from telemetry.
-
-Strict geographic/global ordering, general cross-device latest-state discovery, cross-session transactions, and immediate cross-device revocation are outside this phase. Authorization requiring those guarantees needs a separate design. Resolve the open decisions in [sources.md](sources.md) before implementation; the user's consistency selection does not approve every proposed mechanism.
+Build the proposed public API, validate bounded fan-out/cancellation/error semantics, and measure outcomes with the scenarios in [validation.md](validation.md). The [AWS spike](spike/README.md) retains historical controls/results; it does not implement the revised group-racing Available policy. No production SDK, linearizable protocol, or immediate cross-device revocation guarantee is established. Keep retained data, credentials, payloads, and bearer IDs out of logs and PR artifacts.

@@ -2,6 +2,8 @@
 
 This is an **experimental measurement harness**, not the production session SDK or a strict geographic-consistency implementation. It deploys Redis Software **8.2.6-25**, the latest release verified on 2026-11-09, and requests database compatibility **8.8**. The [official download selector](https://redis.io/downloads/#Redis_Software) and [release notes](https://redis.io/docs/latest/operate/rs/release-notes/rs-8-2-releases/rs-8-2-6-25/) identify that build. The installer checksum is pinned in deployment variables; do not use a floating latest image for results.
 
+The revised production API has `local` (one regional lookup) and default `available` (concurrently race all selected group members, including local; first non-null value, or null on all-null/deadline). Session reads have been removed from production scope. This legacy spike retains `latest`, `any`, and `required` controls and explicitly managed actor context; **it does not implement the new group-racing Available policy**. Historical run reports and runtime controls retain their original meanings. New production reads need separate implementation and measurement.
+
 ## Topology
 
 Terraform creates five isolated VPCs, a full mesh of ten inter-region peering links, private DNS, fifteen Redis nodes (three per regional cluster across AZs), and five regional runners. Each regional database uses three primary data shards plus replicas. The independent and Active-Active datasets coexist on ports 12000 and 12001 so they can use the same hardware; run one workload at a time and record residual background traffic.

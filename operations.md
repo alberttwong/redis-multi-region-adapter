@@ -1,41 +1,31 @@
-# Operating the session adapter
+# Operating Local and Available reads
 
-Status: proposed operational requirements; no commands, workers, or automation implemented. Use [backends.md](backends.md) for transport mechanics and [validation.md](validation.md) for evidence.
+Status: proposed production requirements. The [legacy AWS spike](spike/README.md) has separate controls and measured runs. See [spec.md](spec.md) and [backends.md](backends.md).
 
-## Record deployment and policy
+## Configuration and scope
 
-For each region, record endpoint, geographic group, Redis Software build, database compatibility version, three primary data shards, replicas, persistence, capacity, eviction, and selected distribution mode. Record Active-Active identity when applicable; independent mode also records acknowledgment, recovery, target set, and configuration epoch. Verify supported commands for each actual backend. Keep credentials outside Git.
+Record exact Redis Software/client builds, three primaries per regional database plus replicas, persistence, expiry, capacity, local endpoint, allowed groups, default read group, shared read deadline, and concurrency/pool limits. US has three regional clusters; EU two; global is explicit. Available groups must include local and resolve to distinct known endpoints. Six clients on five databases do not mean six targets.
 
-Cells and Redis targets change independently. Endpoint refresh must preserve caller context, snapshot/operation IDs, deadlines, and the selected policies. No implicit target removal, recovery change, or read-policy downgrade is permitted.
+Default policy is `available`; explicit `local` reads only local. Capture membership/epoch at dispatch. Reject malformed or unauthorized groups before sending reads. Read groups do not shrink captured all-target write obligations or add a foreign-group wait to local write acknowledgment.
 
-A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`; each retains its own write context. A1/A2 use the same logical regional database in the example; verify their endpoints and candidate publication before assuming local visibility. Independent clients do not receive each other’s context/notifications and do not wait for unknown versions. Preserve same-caller context across regions without implying cross-device handoff.
+## Read outcomes
 
-Record US membership as us-west-2/us-east-1/us-east-2 and EU as eu-west-1/eu-central-1. Verify delivery/lag across groups separately. Group membership must not silently shrink all-target obligations or add a synchronous foreign-group wait to local acknowledgment.
+Available concurrently queries every group member including local. Return first valid non-null value immediately; continue past null replies, failed probes, and rejected candidates. Return null on all-null completion or shared deadline without a value. Do not block a winner on loser cleanup. Cancel/discard losing or late work without leaking connections, workers, or callbacks.
 
-## Handle a missing snapshot
+A stale first value is permitted. A deadline-null may occur when a value exists in a slow/unreachable cluster. Record winner, all-null, deadline-null, failed/rejected attempts, and late replies separately. Keep request-level access/configuration failures as errors. Local returns value/null for one endpoint, with infrastructure and integrity errors distinct; it has no automatic remote fallback.
 
-Validate context and inspect locally available state. Default `latest` rechecks both eligible successor candidates and the required exact snapshot during its bounded wait; explicit `required` checks only the exact identity. At deadline, an expected unexpired snapshot still unavailable is **snapshot missing** (`FreshnessUnavailable`, reason `snapshot_missing`). Ordinary unprotected absence may return null; explicit expiry, connectivity, authentication, integrity, and context errors remain distinct.
+No caller write-context, successor proof, exact-version public read, or production Session path is required. Internal write-placement checks may still identify an expected copy as **snapshot missing**; this is not the public Available timeout contract. Keep raw payloads, bearer IDs, and credentials out of logs.
 
-No remote fetch or old-value fallback occurs automatically. A newer default-read result needs verified history evidence; its numeric label alone is insufficient. Keep genuine first reads without context separate from missing expected context.
+## Writes and recovery
 
-## Independent distribution
+Independent request-only distributes the next same-session update's latest version and need not restore missing history. Idle regions can remain stale indefinitely. Optional durable replay must capture obligations before success, retain original expiry, retry idempotently, and apply backpressure before obligations are lost. Monitor backlog, oldest work, per-target progress, and expiry.
 
-Request-only mode sends the latest version on the next insert/update for the same session. It does not retain historical delivery obligations or require manual repair as the normal flow. If 43 arrives while exact 42 never does, default latest may use proven successor 43; exact 42 reports missing. Without another write, a remote region can remain stale.
+Local acknowledgment accepts the origin; explicit independent all-target success requires every captured target. Timeout is partial/uncertain, not rollback. Preserve original IDs and targets for reconciliation; a later write does not retroactively acknowledge an earlier one. Read groups and write participant sets remain separate.
 
-When durable replay is enabled, monitor worker health, per-target backlog, oldest undelivered work, delivery conflicts, expiry, retries, and backpressure. Rehearse atomic-capture failure, request crash, worker restart, duplicate/reordered delivery, and gap-free new-target catch-up. Do not trim work before its retention/delivery contract permits it.
+## Restore, rollout, and evidence
 
-All-target timeout is a partial/uncertain result, not rollback. Reconcile the original snapshot/operation and captured target set. A later write does not turn an older uncertain result into success. Enabled replay may complete its copies independently of later requests.
+Restored/admitted targets need backend-specific readiness, integrity/expiry checks, and any selected replay catch-up protocol. Healthy connectivity does not prove freshness. Request-only admission has no historical-backfill promise. Preserve epochs and outstanding write obligations during changes.
 
-## Expiry, restore, and region changes
+Measure Local and Available at realistic group size/load, including null/error rates, all-attempt histograms, per-target latency, pool saturation, fan-out counts, cancellations, and late work. Rehearse first-null/later-value, all-null, deadline-null, stale-first, partial endpoint failure, membership changes, and winner cleanup. Rollout/rollback must preserve the documented policy behavior; no production release automation is installed by these documents.
 
-Keep origin snapshots for the accepted context and retry horizons plus a safety margin. Destination retention applies to delivered copies; it does not promise delivery of missing historical snapshots in request-only mode. Bind server-assigned absolute expiry into context and records, with an agreed skew policy. Never reset TTL during replay or interpret an early miss as normal expiry.
-
-After restore, eviction, or data regression, validate endpoint readiness and record integrity before restoring protected traffic. Recover retained work where available; missing records remain missing. Active-Active follows supported product catch-up procedures. Independent replay uses baseline plus gap-free replay; request-only targets receive future writes and do not claim historical catch-up. Configuration changes preserve outstanding all-target obligations.
-
-## Observe and release
-
-Measure ordinary misses, snapshot-missing outcomes, freshness waits, candidate rejection, context/proof errors, infrastructure failures, partial writes, fan-out success per target, replay backlog when enabled, pool saturation, and shard skew. Use opaque correlation IDs; exclude payloads, bearer IDs, credentials, and raw tokens. Agree numeric targets and paging ownership before launch.
-
-Rehearse each supported combination in staging, then limit initial traffic. Rollback preserves envelope/token compatibility, sequencing, expiry, and the chosen contract. Pause protected operations if an older version cannot honor it. No release gate or permission control is installed by these documents.
-
-An incident record captures the violated requirement, sanitized evidence, policy/topology, mitigation, and uncertainty. Add a regression scenario and propose follow-up intent. Current authorization/revocation remains a separate service/security responsibility.
+Active-Active provides eventual convergence. Linearizable coordination and immediate cross-device revocation remain separate deferred designs; neither a racing read nor all-target placement establishes them.

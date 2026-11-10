@@ -1,27 +1,28 @@
-# Multi-region session consistency
+# Multi-region read behavior
 
-Design documents plus an experimental AWS latency spike. Start with README.md, spec.md, plan.md, and spike/README.md. The spike is not the production SDK or a strict geographic protocol.
+Design documents plus an experimental AWS latency spike. Start with README.md, spec.md, plan.md, and spike/README.md. The legacy spike is not the revised production SDK or a linearizable protocol.
 
 ## Spike commands
 
 - Setup: `python3 -m venv spike/.venv` then `spike/.venv/bin/pip install -r spike/requirements.lock.txt`.
-- Tests: `PYTHONPATH=spike spike/.venv/bin/python -m unittest discover -s spike/tests -v` (all tests pass).
+- Tests: `PYTHONPATH=spike spike/.venv/bin/python -m unittest discover -s spike/tests -v`.
 - Terraform: `terraform -chdir=spike/infra fmt -check -recursive` and `terraform -chdir=spike/infra validate`.
-- Deployment and run commands: spike/README.md. Confirm the account, cost, artifact/secret ARNs, and pinned installer before apply.
-- Keep Terraform state, plans, local inventory/results, raw license, and credentials outside Git. Secret values must not enter Terraform inputs/state or SSM command text.
+- Deployment/run commands: spike/README.md. Existing AWS authorization is not a request to provision or restart infrastructure during documentation work.
+- Keep state, plans, inventory/results, raw license, and credentials outside Git.
 
 ## Required behavior
 
-- Target Redis Software 8.x, three primary shards per regional database; replicas additional. Support Active-Active and independent fan-out modes.
-- Default read is `latest-local-ryow`. Carry authenticated caller context. A local successor needs verified lineage/history evidence; a higher number alone is insufficient.
-- Recheck both the local candidate and required snapshot while waiting on a default read. Explicit `required` returns only the exact requested snapshot. Explicit `any` permits older valid local state or null.
-- Describe an absent expected snapshot as **snapshot missing**; keep infrastructure, integrity, context, and expiry outcomes distinct.
-- A1/A2 read/write us-west-2; B1 reads/writes us-east-1; C1 reads/writes us-east-2; D1 reads/writes eu-west-1; E1 reads/writes eu-central-1. US groups the three US regions; EU groups the two EU regions. Each keeps its own context with no cross-client sharing. A1/A2 share a regional database in the example, but not a lineage. Local discovery avoids WAN delay only where the candidate is actually published. Defaults do not change. Groups do not automatically change the captured all-target acknowledgment set.
-- Independent request-only mode refreshes through the next insert/update's latest version, not mandatory manual repair or historical replay. Durable replay is optional; capture its obligation before success when enabled.
-- Local acknowledgment is the baseline. Optional independent all-target acknowledgment verifies placement, not strict ordering. Never silently drop a target on timeout.
-- Serialize writes per caller lineage; prevent response/context rollback. No fixed home cluster, automatic remote read fallback, or strict geographic/global guarantee.
-- Never log session payloads, raw context, bearer IDs, or credentials.
+- Default `available`: query all selected group members concurrently, including local. Return the first valid non-null value; null on all-null completion or shared deadline without a value. An early null never beats a pending value.
+- Explicit `local`: query only local; valid value or null, with infrastructure errors separate. Active-Active handles propagation, or independent mode uses adapter write fan-out.
+- Session reads have been removed from production scope. No caller write context, RYOW enforcement, successor proof, public exact-version selector, or `greedy` policy. Deferred `linearizable` is unsupported.
+- Available can return stale data; timeout-null is not proof of absence. Capture/validate groups including local; no silent target removal, sequential fallback, latest comparison, or write-back.
+- Cancel or discard losing/late results; bound concurrency, pools, deadlines, and request sizes. Validate authorization, key binding, generation, integrity, and expiry.
+- US: west/east-1/east-2; EU: eu-west-1/eu-central-1. A1/A2 share the west database; six clients mean five targets, fifteen primary shards before replicas. Read groups do not shrink all-target write obligations.
+- Independent request-only refreshes the next same-session update's current version. Optional durable replay captures obligations before success. Local acknowledgment is baseline; independent all-target verifies placement, not ordering/durability.
+- Active-Active is eventually consistent, not linearizable. A possible linearizable overlay remains unvalidated and deferred.
+- Preserve IDs on uncertain-write reconciliation. Internal placement misses may be described as **snapshot missing**; public Available misses/timeouts return null.
+- Never log payloads, credentials, bearer IDs, or raw tokens.
 
 ## Completion evidence
 
-Use validation.md and REVIEW.md. Keep spec.md and plan.md synchronized with implementation. Proposed scenario descriptions are not test results. Report actual checks and unresolved design decisions; documents do not install controls or provision infrastructure.
+Use validation.md and REVIEW.md. Production scenarios are proposed acceptance checks, not executed results. Legacy spike tests and measurements do not certify group-racing Available behavior. Keep plans and documentation synchronized with actual implementation.

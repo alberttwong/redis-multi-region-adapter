@@ -4,20 +4,20 @@ Status: planning model with an [experimental AWS measurement harness](spike/READ
 
 ## Measure the right operation
 
-Measure from application invocation to its returned result, including middleware, pool queues, Redis/network work, context handling, retries, verification, and waiting. Report write acknowledgment, read response, and background delivery separately. A server command benchmark does not measure the proposed adapter's RYOW or fan-out path. Redis's [benchmarking guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/) discusses workload/client effects; its [latency guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/) distinguishes client/network and server sources of delay. Neither supplies this deployment's p99.
+Measure from application invocation to its returned result, including middleware, pool queues, Redis/network work, group dispatch, retries, verification, and waiting. Report write acknowledgment, read response, and background delivery separately. A server command benchmark does not measure the proposed adapter's group-read or write fan-out path. Redis's [benchmarking guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/) discusses workload/client effects; its [latency guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/) distinguishes client/network and server sources of delay. Neither supplies this deployment's p99.
 
-Produce per-origin/per-destination results at specified offered load and payload size. Separate successful responses, snapshot-missing outcomes, other errors, and all-attempt latency. Report success/error/timeout rates next to p99; fast failures or success-only histograms can hide poor availability. Also measure write-to-first-dependent-read latency: local acknowledgment can move delay from the write into a later read.
+Produce per-origin/per-destination results at specified offered load and payload size. Separate successful responses, all-null and deadline-null outcomes, other errors, and all-attempt latency. Report success/error/timeout rates next to p99; fast failures or success-only histograms can hide poor availability. Also measure write-to-subsequent-read latency: local acknowledgment can move delay from the write into a later read.
 
 ## Request-path model
 
 The following variables are **per-request durations or random variables**, not p99 values to add:
 
-- `H`: adapter/middleware/client overhead, including pool waiting and context processing not counted below.
+- `H`: adapter/middleware/client overhead, including pool waiting and group dispatch not counted below.
 - `O`: accepted local origin write under its chosen persistence policy.
 - `C`: accepted origin write plus recoverable replay capture. Treat this as one measured path; atomic capture may share work/round trips with the write.
 - `D_i`: time from fan-out dispatch until target i satisfies its exact-record verification/persistence contract. Include network transfers, command phases, connection queues, retries, and application verification.
 - `J_i`: dispatch delay before target i's attempt, such as worker backlog or request scheduling.
-- `R`: the actual local read/proof path; hint lookup plus exact lookup can require multiple calls.
+- `R_i`: one regional candidate lookup and validation, including connection/pool time and response transfer.
 
 A simple planning timeline accepts origin/capture first and then dispatches remote copies in parallel. Under that explicit scheduling assumption:
 
@@ -50,19 +50,20 @@ Background transport still consumes resources in A–C and can increase origin q
 
 ## Read-policy model
 
-A1/A2 read/write locally in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`, D1 in `eu-west-1`, and E1 in `eu-central-1`, without cross-client communication. Measure each client’s own protected reads separately from its discovery of another client’s updates. A1-to-A2 visibility on the shared regional database includes local candidate publication/read timing, not a WAN replication delay. B1/C1/D1/E1 visibility also includes regional delivery and candidate publication. Readers with no own requirement do not wait for unknown updates; protected reads refer to a caller carrying context from its own writes. Do not assign A1’s freshness requirement or propagation wait to A2/B1/C1/D1/E1 automatically. US groups the three US regions and EU groups the two EU regions. With five configured targets, all-target fan-out has four remote target paths from the origin, including cross-group links. Local acknowledgment does not wait for those links. An origin-group-only barrier is not assumed; its p99 would require a separate participant-set definition. A2 is not a sixth database target.
+Local contacts one endpoint. Available (default) concurrently contacts every captured group member, including local. US has three regional targets, EU two, and an explicitly configured global group five; A1/A2 sharing west does not create another target. Read groups do not change all-target write obligations.
 
-**Default latest, no prior-write context:** local candidate read and validation. There is no freshness wait, but candidate absence can return null. Do not describe this as cross-device latest discovery.
+Let `t_i` be elapsed time from read invocation until a valid non-null reply from member i (including dispatch/pool/network/validation), and `d` the shared deadline. Available value latency follows the first such reply before `d`. If every member returns null earlier, latency follows the last null. Otherwise no value by `d` produces deadline-null. Failed/rejected attempts never beat a valid value and can make no-value reads reach `d`. Local latency follows its single lookup; local infrastructure failures remain errors.
 
-**Default latest with context:** read/validate the local candidate. If it is ineligible, check the required exact identity and keep rechecking candidates plus exact identity until eligible data arrives or the deadline expires. A proven successor can satisfy the read even when the original version is missing.
+```text
+Local:       one regional candidate lookup
+Available:   first valid non-null reply before d
+             else last null if all members replied null before d
+             else d with a null value
+```
 
-**Required:** read/validate only the exact identity and wait for it if absent. A newer version cannot shorten the wait for missing exact 42.
+A first null must not stop the race. A first stale value must not wait for a newer value or quorum. Do not wait for cancellation/cleanup of slower requests before returning a winner; measure loser work, per-target request counts, pools, and late responses separately. Both non-null and null results may miss a completed write. Distinguish all-null, deadline-null, invalid configuration/authorization, and per-target errors in metrics.
 
-**Any:** read/validate a local candidate without the prior-write freshness requirement. Older state/null is allowed. Authorization, integrity, pool delays, and Redis access still cost time.
-
-For protected latest/required reads, the observed duration is the local work plus any **residual** arrival delay and polling detection cost, bounded by the configured request budget. Residual means delay still remaining when the read begins, not full replication time since the write. Model the actual polling/backoff schedule: detection delay need not be uniformly distributed.
-
-Measure eligible arrival differently by mode: Active-Active transport delay for A, request fan-out completion for B/D, and capture/worker/fan-out delay for C/E. With request-only, a missed original copy may never arrive. A later same-session insert/update can provide an eligible successor for latest; its interarrival and delivery times depend on that session's workload. Exact missing 42 still reports snapshot missing. Without further writes there is no finite guaranteed recovery delay to insert into a p99 model.
+Available's new group-racing behavior is not measured by the legacy spike's `latest`/`any`/`required` runs. Keep historical reports and labels intact. Collect new client-side fan-out traces at representative load before making numeric claims for this API.
 
 ## Why component p99 values cannot simply be added
 
@@ -81,14 +82,14 @@ Where only marginal percentiles exist, a conservative budget can use the union b
 
 ## Timeouts, load, and three shards
 
-If more than about 1% of requests run to a configured freshness or write deadline, the all-attempt p99 will tend toward that deadline, plus cancellation/return overhead. Report that as timeout-limited behavior, not successful service latency. Early infrastructure failures may produce a different distribution. Never omit timed-out attempts from the availability report.
+If more than about 1% of requests run to a configured Available read or write deadline, the all-attempt p99 will tend toward that deadline, plus cancellation/return overhead. Report that as deadline-limited behavior, not fast successful value delivery. Early infrastructure failures may produce a different distribution. Never omit timed-out attempts from the availability report.
 
-Use realistic arrivals and concurrency. A load generator that waits for every response before issuing another request can reduce offered load during a stall and hide queueing; record scheduled arrivals and load-generator saturation. Include payload/token size, TLS, persistence settings, background replay/replication, hot keys, and skew across all three primary shards. Three shards do not divide per-request latency by three; an individual session is mapped to its shard.
+Use realistic arrivals and concurrency. A load generator that waits for every response before issuing another request can reduce offered load during a stall and hide queueing; record scheduled arrivals and load-generator saturation. Include payload/envelope size, TLS, persistence settings, background replay/replication, hot keys, and skew across all three primary shards. Three shards do not divide per-request latency by three; an individual session is mapped to its shard.
 
 Test healthy, delayed, partitioned, backlogged, and post-restore conditions separately. Define whether the service-level result is per region, per configuration, or a production-traffic-weighted mixture; do not average regional p99s to obtain a combined p99. Build the combined histogram at the intended traffic weights instead.
 
 ## Inputs needed for useful numeric estimates
 
-Collect origin acceptance and capture distributions, per-target end-to-end write/verification samples, client-side read/proof samples, eligible-record arrival delay, polling schedules, deadlines, read-after-write timing, same-session update intervals, configuration/region traffic shares, and sustained/burst workload profiles. Record exact builds, persistence, capacity, payloads, and shard distribution with the samples.
+Collect origin acceptance and capture distributions, per-target end-to-end write/verification samples, client-side per-member read samples, candidate publication timing, group fan-out/cleanup overhead, deadlines, read-after-write timing, same-session update intervals, configuration/region traffic shares, and sustained/burst workload profiles. Record exact builds, persistence, capacity, payloads, and shard distribution with the samples.
 
-First compare the symbolic paths above. Next construct estimates from measured aligned traces or a clearly labeled simulation and give sensitivity ranges/confidence intervals. Finally validate with the real adapter at target load. Report each result with preset A–E, origin, destination, read policy/context condition, acknowledgment/recovery, outcome rates, and evidence source. Until these inputs exist, no preset has an honest numerical p99 prediction.
+First compare the symbolic paths above. Next construct estimates from measured aligned traces or a clearly labeled simulation and give sensitivity ranges/confidence intervals. Finally validate with the real adapter at target load. Report each result with preset A–E, origin, destination, read policy/group/outcome condition, acknowledgment/recovery, outcome rates, and evidence source. The existing baseline is experimental evidence for its recorded controls, not a numerical p99 prediction for the revised Local/Available production API.

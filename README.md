@@ -1,19 +1,37 @@
 # Multi-region session consistency
 
-Design for **latest local with read-your-own-writes**, named `latest-local-ryow`, on **Redis Software 8.x**. Each regional database has **three primary data shards**, with replica shards additional. The per-region interpretation remains a sizing assumption to confirm.
+Design for **Available reads by default** (`available`) and explicit **Local reads** (`local`) on **Redis Software 8.x**. Each regional database has three primary data shards, with replicas additional. The per-region sizing interpretation remains an assumption to confirm.
 
 ## Consistency
 
-| Consistency level | What it guarantees | Redis infrastructure and application responsibilities | Coverage in this project |
-| --- | --- | --- | --- |
-| **Eventual** | Regional values may differ while updates propagate, then converge when delivery completes. | **Active-Active or independent regional clusters.** Active-Active provides CRDT replication and strong eventual convergence. Independent clusters need application-managed distribution and recovery to ensure delivery. | Unprotected local reads have eventual semantics. Independent request-only delivery can leave gaps indefinitely without a later write. |
-| **Read-your-own-writes (RYOW)** | A caller's dependent reads honor its acknowledged write, using carried context; unavailable required state is reported explicitly. Other callers may still see older state. | **Active-Active or independent regional clusters**, plus application-carried write context and protected-read checks. Active-Active alone does not ensure a different region has caught up to the caller's write. | **Project target: latest local + RYOW (`latest-local-ryow`).** The default returns eligible local state or waits/reports snapshot missing. |
-| **Strict geographic (group-scoped linearizability)** | All callers share one per-session ordered history within a geographic group; a read after a completed write reflects it or a later committed update. | **Active-Active as the planned replication base**, plus a separately designed group-scoped authority/commit protocol, coordinated reads, fencing, and recovery. Native Active-Active replication alone does not provide this guarantee. | Deferred; no strict protocol is specified or implemented. Independent-cluster strict designs are outside the planned scope. |
-| **Strict global (global linearizability)** | The same per-session ordering guarantee spans all geographic groups. | **Active-Active as the planned replication base**, plus a separately designed global authority/commit protocol, coordinated reads, fencing, and recovery across groups. Native Active-Active replication alone does not provide this guarantee. | Deferred; no strict protocol is specified or implemented. Independent-cluster strict designs are outside the planned scope. |
+Propagation, read behavior, and cluster-group scope are separate choices.
 
-Active-Active is the infrastructure direction for future strict modes to avoid building regional replication and convergence ourselves; it is a project architecture choice, not a theoretical prerequisite for linearizability. Redis documents Active-Active as **strong eventual consistency**, with optional causal ordering. Neither guarantees immediate cross-region visibility after acknowledgment. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and the [infrastructure comparison](consistency.md#infrastructure-by-consistency-level).
+**How regional copies converge**
 
-Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. Coverage describes the production design; the experimental AWS spike exercises a subset without establishing a production guarantee. See [consistency.md](consistency.md).
+| Convergence | Meaning | Infrastructure |
+| --- | --- | --- |
+| **Eventual** | Copies may differ during delivery and converge when delivery completes. | Active-Active owns replication; independent clusters need adapter fan-out/recovery. Request-only delivery can leave gaps indefinitely without a later write. |
+
+**Read behavior**
+
+| Behavior | Result | Implementation status |
+| --- | --- | --- |
+| **Local** / `local` | Read only the local cluster; return valid data or null. Redis Active-Active handles propagation, or the adapter handles it for independent clusters. | Proposed explicit option; no freshness guarantee. |
+| **Available** / `available` | Query every cluster in the selected group concurrently, **including local**. Return the first valid non-null value; return null when all replies are null or the deadline expires without a value. | **Default.** Remote null replies do not end the race while other requests are pending. |
+| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | Deferred and unsupported; requires a separately designed coordination protocol. |
+
+Neither Local nor Available guarantees the newest value or read-your-own-writes. Available chooses the first value, not the first reply if that reply is null. It may return older data even when another cluster has newer data. Timeout-null means no value was obtained within the deadline, not proof that the key is absent everywhere.
+
+**Cluster-group scope**
+
+| Scope | Membership | Effect |
+| --- | --- | --- |
+| **Geographic group** | US: three US regions; EU: two EU regions | Available races the selected group's members, including the caller's local cluster. A future linearizable scope would require coordination within the group. |
+| **Global group** | An explicitly configured group containing all five regions | Available can race all five if that group is selected. Future global linearizability remains deferred. |
+
+Available uses the local region's configured read group unless a valid group override is provided. Membership must include the local cluster. Read groups do not change write acknowledgment targets. Active-Active provides strong eventual convergence, not linearizability; its possible use as the replication base of a linearizable design is unvalidated. See [consistency.md](consistency.md).
+
+The Session read option has been removed. Production reads require no caller write context, successor proofs, or public exact-version selector. The [experimental spike](spike/README.md) retains historical controls and results; it does not implement this revised production API.
 
 ## Start here
 
@@ -27,7 +45,7 @@ Deployment has three separate choices:
 
 Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
-Read policies are `latest` by default, explicit `required` for one exact version, and explicit `any` for any valid local candidate. None promises the latest completed update across all devices or regions.
+Public read policies are `available` (default) and `local`. `linearizable` is deferred and rejected as unsupported. There is no `session`, `required`, or `greedy` public policy.
 
 ## AWS latency spike
 
@@ -46,6 +64,6 @@ Read policies are `latest` by default, explicit `required` for one exact version
 
 ## Status
 
-Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
+Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected. Group-racing Available is a revised production design; the legacy spike does not implement it.
 
 The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

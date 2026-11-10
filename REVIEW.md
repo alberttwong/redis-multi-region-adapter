@@ -1,20 +1,15 @@
 # Review guidance
 
-Use [spec.md](spec.md) as the behavior contract, [plan.md](plan.md) for scope, and [validation.md](validation.md) for proof. Review the configured backend, acknowledgment, recovery, and read policies together.
+Use [spec.md](spec.md) as the contract, [plan.md](plan.md) for implementation scope, and [validation.md](validation.md) for evidence. Production APIs are proposed; legacy spike behavior is distinct.
 
 ## Review passes
 
-1. **Read correctness:** validate context, candidate/successor proof, exact lookup, bounded waiting, and outcome classification. Default latest must recheck candidates while waiting; exact reads never substitute a successor. No stale success, implicit downgrade, or missing-context bypass.
-2. **Write lifecycle:** inspect latest-version construction, single-lineage sequencing, response reordering, idempotent retries, partial outcomes, and identity/content collisions. A next write is not a retroactive acknowledgment of an uncertain prior write.
-3. **Distribution and recovery:** Active-Active writes once. Independent fan-out copies the same immutable envelope, not a repeated business mutation. Request-only refreshes on the next same-session insert/update. Enabled durable replay requires recoverable capture, expiry-safe delivery, no loops, retention, backpressure, and catch-up. All-target success verifies every captured member without timeout-driven shrinkage.
-4. **Security and operations:** verify token/caller binding, absence of assumed cross-client context sharing, generation/expiry handling, exact backend compatibility, three primary shards per database, pooling, restore, and sanitized telemetry. Require integration evidence for each supported backend/recovery combination; request-only does not require a worker.
+1. **Available race:** every captured group member, including local, starts concurrently. Return first valid non-null value immediately; a null reply does not stop pending attempts. Return null only on all-null completion or the shared deadline without a value. No newest-value comparison, quorum, repair, or sequential fallback.
+2. **Local and errors:** Local contacts one regional endpoint. Validate authorization, binding, integrity, generation, and expiry for both reads. Preserve Local infrastructure errors and request-level configuration/access errors; Available per-target failures do not cancel healthy attempts. Distinguish deadline-null from confirmed all-null in telemetry.
+3. **Resource lifecycle:** shared bounded deadline, bounded group fan-out/pools, cancellation, and disposal of loser/late replies. A winner must not await slow cleanup. Group membership is fixed per operation and includes local; unauthorized or malformed overrides fail before dispatch.
+4. **Write/distribution:** stable IDs, immutable envelopes, no repeated business mutations on fan-out, original expiry, uncertain-write reconciliation, request-only next-write refresh, and optional durable replay capture/recovery. All-target success verifies the entire captured target set and does not establish linearizability.
+5. **Scope and evidence:** no production Session option, caller write-context automation, or public exact-version selector. Read groups do not shrink write obligations. Active-Active provides eventual convergence. Historical spike tests/results are not production acceptance for group-racing Available.
 
-The no-communication scenario permits B1/C1/D1/E1 to read older local state/null before A1’s update arrives. Same-region A2 can discover A1’s published candidate without WAN replication, but does not inherit A1’s context or a strict cross-client guarantee. That is not a RYOW defect. Neither a local hint, fan-out barrier, nor snapshot hit proves global latest state or current revocation. Describe an absent expected snapshot as **snapshot missing**, not as an infrastructure failure.
+## Severity and completion
 
-Review geographic membership (three US and two EU regions), six-client/five-database shard counts, and the actual captured acknowledgment set. Local acknowledgment must not wait for foreign groups; all-targets must not silently become origin-group-only because groups were declared.
-
-## Findings
-
-Critical findings expose secrets, cross caller/security boundaries, or bypass a separately required authorization policy. Important findings violate a reproducible read/write/distribution contract, permit context rollback, create unbounded waits, or make false durability claims. Minor findings concern clarity or maintainability without a behavior impact.
-
-For each substantive finding, give its trigger, consequence, requirement ID, and evidence. Limit minor findings to three. Review findings do not constitute approval, and unconfigured protections must not be described as enforced.
+Critical findings expose secrets, cross caller/security boundaries, or bypass authorization. Important findings violate the documented race, return early null, accept invalid state, leak unbounded work, or make false ordering/durability claims. Minor findings concern clarity or maintainability without behavioral impact. Confirm the five-region/six-client sizing and review actual measurements/tests rather than proposed scenarios alone.

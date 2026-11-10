@@ -4,7 +4,7 @@ This is an **experimental measurement harness**, not the production session SDK 
 
 The revised production API has `local` (one regional lookup) and default `available` (concurrently race all selected group members, including local; first non-null value, or null on all-null/deadline). Session reads have been removed from production scope. This legacy spike retains `latest`, `any`, and `required` controls and explicitly managed actor context; **it does not implement the new group-racing Available policy**. Historical run reports and runtime controls retain their original meanings. New production reads need separate implementation and measurement.
 
-Production recovery is now named/defaulted as `next-write-refresh` for independent clusters and `redis-managed` for Active-Active, with independent `durable-replay` opt-in. This legacy harness and historical reports retain their original `request-only` recovery control/preset meanings; their runtime defaults and recorded measurements have not been renamed by the design-document update.
+Production design now uses **no background repair** for independent clusters and **Redis-managed** replication recovery for Active-Active, without a separate recovery selector. Each later independent same-session write fans out its current value normally. This legacy harness retains its original `request-only` and durable-replay controls, including experimental presets C/E; their runtime defaults and historical measurements are unchanged and do not add replay to production scope.
 
 ## Topology
 

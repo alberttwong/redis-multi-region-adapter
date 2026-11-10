@@ -6,7 +6,7 @@ The production default is **Available** (`available`); **Local** (`local`) is ex
 
 | Question | Choices | Meaning |
 | --- | --- | --- |
-| How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
+| How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies bounded request-time fan-out without background repair. |
 | How is a value read? | Local; Available (default) | The base strategy selects one local candidate or a concurrent group race. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
 | Is stronger ordering required? | Monotonic on/off modifier for Local/Available; Linearizable over either named backend | Off supplies no caller read-order guarantee; on prevents same-key caller read regression without changing the source scope or creating a global order; Linearizable targets real-time freshness. |
@@ -15,7 +15,7 @@ Neither supported read behavior provides RYOW, newest-value selection, or quorum
 
 ## Infrastructure by consistency level
 
-Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Next-write refresh may leave idle regions stale indefinitely without another write.
+Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application fan-out with no background repair. Missed delivery may leave idle regions stale indefinitely without another same-session write.
 
 Active-Active supplies native per-key causal ordering when enabled, not linearizability. Both backends can target caller monotonicity through automatic read-history enforcement, or full linearizability through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
 
@@ -73,7 +73,7 @@ flowchart LR
     US <-->|Asynchronous cross-group data distribution| EU
 ```
 
-Data transport is Redis Active-Active replication or configured independent adapter fan-out, with durable replay optional. The diagram groups regions; it does not specify physical network routing, synchronous write acknowledgment, or cross-client context sharing. Group names do not select an acknowledgment target set. With baseline local acknowledgment, cross-group distribution is outside the write success path.
+Data transport is Redis Active-Active replication or configured independent adapter fan-out. No application background repair worker is planned. The diagram groups regions; it does not specify physical network routing, synchronous write acknowledgment, or cross-client context sharing. Group names do not select acknowledgment targets. With local acknowledgment, cross-group delivery is outside the success path.
 
 ## A1 writes 42; readers race within a group
 
@@ -97,6 +97,8 @@ An Available read group includes local and may be geographic or explicitly globa
 
 ## Distribution and history
 
-Independent clusters default to `next-write-refresh`; Active-Active defaults to `redis-managed`. Durable replay is an explicit independent-cluster opt-in. Read groups, monotonic settings, and acknowledgment choices do not change these recovery defaults.
+Independent clusters have no background repair; Active-Active has Redis-managed replication recovery. These are backend behaviors, not configurable recovery modes. Read groups, monotonic settings, and acknowledgment choices do not change them.
 
-Next-write refresh mode distributes only the next same-session update's latest version; it need not restore missing historical 42 when 43 is delivered. Local/Available read current candidates without requiring either exact identity. Internal placement verification can still describe a known absent copy as **snapshot missing**. Durable replay optionally retains original copy obligations; neither replay nor all-target placement creates linearizability or proves current authorization.
+Every independent same-session write distributes its current version; delivery of 43 need not restore missing historical 42. This is normal fan-out, not a recovery mode. Local/Available read current candidates without requiring exact identity. Internal placement verification can describe a known absent copy as **snapshot missing**. All-target placement does not create linearizability or prove current authorization.
+
+Local and Available inherit same-key causal operation ordering when Active-Active causal consistency is enabled. This backend ordering does not ensure a region has caught up or prevent a caller from reading older state after switching regions. With monotonic on, both strategies additionally enforce per-caller same-key non-regression using automatic read history; independent clusters need that enforcement too. Neither causal ordering nor monotonic reads guarantees the latest completed write. Same-key Redis ordering must not be assumed to order multiple snapshot/hint keys.

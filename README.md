@@ -1,10 +1,21 @@
 # Redis Multi-Region Adapter
 
+**Read questions**
+
 1. **Local:** Does my local cluster have a value?
 2. **Available (default):** Does any cluster in my group have a value?
 3. **Optional monotonic guarantee:** Can I read without going backward from what I have already seen?
 4. **Linearizable over Active-Active:** Does this read reflect writes completed before it began, using Active-Active plus coordination?
 5. **Linearizable over Coordinated:** Does this read reflect writes completed before it began, using independent clusters plus coordination?
+
+**Write questions**
+
+6. **Distribution:** Does Redis replicate this write, or does the adapter send it to independent clusters?
+7. **Acknowledgment:** Can the write succeed after local acceptance, or must every configured target verify it?
+8. **Missed delivery:** Does Redis retry delivery, or can it remain incomplete until another write to the same session?
+9. **Linearizable commit (proposed):** Is this write committed in one real-time order with all participating reads and writes within scope?
+
+The [Distribution table](#distribution) answers question 6; [Write behavior](#write-behavior) answers questions 7 and 9; [Recovery](#recovery) answers question 8. Linearizable commit requires a future custom protocol.
 
 **Available reads by default, with monotonic off.** Redis Multi-Region Adapter is a proposed adapter for Redis Software 8.x across regional databases. It separates where reads look, how writes reach other regions, and which guarantees require coordination.
 
@@ -99,11 +110,20 @@ Session and Causal are not separate public read options. There is no public exac
 
 **Effort:** S = bounded feature; M = moderate concurrency/resource handling; L = substantial automatic history and correctness work; XL = distributed protocol and failure/recovery validation. Estimates assume shared clients, authorization, validation, and topology plumbing; they exclude infrastructure and a complete production SDK. The L history feature is shared by Local/Available, and linearizable read/write work is shared too, so sizes are not additive. Stronger-guarantee estimates have low confidence until the designs are selected.
 
+## Distribution
+
+**Who sends the write to other regions?** Distribution follows the selected backend. It does not select when a write may return success.
+
+| Distribution | Backend | How a write reaches other regions | Who handles missed delivery? |
+| --- | --- | --- | --- |
+| **Redis-managed** | Active-Active | Application writes once to its local database; Redis replicates to participating regions. | Redis, through native replication and catch-up. |
+| **Adapter fan-out** | Independent clusters | Adapter sends the same immutable identified update to every configured write target. | No background repair. A later same-session write distributes its current value; without another write, missed delivery can remain unrepaired indefinitely. |
+
+Read groups do not change write targets. Reuse IDs, content, and original absolute expiry on retries; copying must not repeat business mutations. Publish a discovery candidate only after storing its snapshot. See [backends.md](backends.md) for the distribution contract.
+
 ## Write behavior
 
-First choose distribution: **Active-Active** accepts one origin write and Redis handles replication; **independent clusters** require the adapter to copy the same immutable identified update to each configured target. Reuse IDs, content, and original absolute expiry on retries; copying must not repeat business mutations. Publish a discovery candidate only after storing its snapshot.
-
-Then choose acknowledgment:
+**When can the write return success, and with what ordering guarantee?** Choose acknowledgment separately from distribution. Linearizable commit additionally requires a matching read/write protocol.
 
 | Write behavior | Backend | Success acknowledged when | Ordering / visibility guarantee | Write latency | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -117,7 +137,7 @@ A write deadline does not mean null, rollback, or success. Report partial/uncert
 
 ## Recovery
 
-Here, recovery means completing missed inter-region delivery. Local Redis HA, restart/restore, and persistence remain separate operational concerns.
+**What happens when delivery is incomplete?** Here, recovery means completing missed inter-region delivery. Local Redis HA, restart/restore, and persistence remain separate operational concerns.
 
 | Recovery | Backend | After incomplete delivery | Requires another write? |
 | --- | --- | --- | --- |

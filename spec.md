@@ -14,6 +14,12 @@ With monotonic off, neither behavior guarantees read-your-own-writes, monotonic 
 
 The Session and Causal read options and custom causal protocol workstream have been removed. Monotonic is a proposed boolean modifier over successful Local/Available reads, default `false`, not a separate policy; it does not promise visibility of an unread acknowledged write. Record identities remain internal distribution/idempotency metadata, not a public read selector or freshness requirement. The experimental spike retains legacy controls and results; it is not this production API.
 
+## Freshness terminology
+
+For Local/Available, `monotonic: false` supplies no per-caller read-order guarantee; `monotonic: true` supplies per-caller non-regression on the same key in the accepted history, once a floor exists. This is not a cross-caller/global total order.
+
+The docs distinguish **last-observed freshness** from **real-time freshness**. The monotonic modifier provides a last-observed floor: a successful read reflects at least the caller's last tracked successful observation, once that floor is established. This is read non-regression, not a maximum staleness age or discovery of the latest completed write. With monotonic off, Local/Available supply no freshness floor. The linearizable contracts require real-time freshness relative to writes completed before the read begins, within the selected scope. Unavailable required state causes waiting/failure, not a successful result that violates the chosen guarantee. Proposed/unimplemented status does not change these target definitions.
+
 ## Public read policies
 
 | Behavior / policy | Scope | Result |
@@ -130,7 +136,7 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
 | R15 | Measure end-to-end latency/outcome rates without leaking secrets | V13, V20 |
 | R16 | Validate guarantee/backend mapping and reject all unimplemented or mismatched stronger options; replace ambiguous Coordinated with its two explicit guarantees. | V21 |
-| R17 | Proposed monotonic-on Local/Available automatically preserve per-caller successful-read history across regions on either backend; reject regression, lost floors, and unprovable state. | V22, V23 |
+| R17 | Proposed monotonic-on Local/Available provide last-observed freshness by automatically preserving per-caller successful-read history across regions on either backend; reject regression, lost floors, and unprovable state. | V22, V23 |
 | R18 | Both linearizable implementations target the same real-time per-key freshness guarantee, including bounded wait/failure rather than stale/timeout-null results. | V24 |
 
 ## Open implementation decisions

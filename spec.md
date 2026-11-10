@@ -67,11 +67,19 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "local", monotonic: true })` (proposed) | Query/recheck only local state while enforcing the caller's last tracked read floor. |
 | `get(sessionId, { policy: "available", monotonic: true })` (proposed) | Race group members including local and accept only candidates satisfying the caller's last tracked read floor. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), proposed boolean `monotonic` (`false` default), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, obsolete standalone `monotonic`, and unimplemented `linearizable`/`linearizable-coordinated`). Reject `monotonic: true` until the modifier integration is implemented; never silently ignore it. Non-boolean modifier values are invalid. There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), `readPolicy` (`available` default or `local`), proposed boolean `monotonic` (`false` default), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, obsolete standalone `monotonic`, and unimplemented `linearizable`/`linearizable-coordinated`). Reject `monotonic: true` until the modifier integration is implemented; never silently ignore it. Non-boolean modifier values are invalid. There is no public exact-version or caller-context read input.
+
+## Delivery recovery by backend
+
+- Independent clusters have **no background repair**. Bounded request-time fan-out does not persist unfinished delivery work. Each later same-session write distributes its current version as normal write behavior; idle regions may remain stale indefinitely.
+- Active-Active has **Redis-managed** replication recovery, with no application capture or replay worker. Redis persistence and durability settings remain separate.
+- Recovery is derived from distribution, not a public selector. Reject obsolete `recovery` configuration, including `request-only`, `next-write-refresh`, `durable-replay`, `not-applicable`, and `redis-managed` values, instead of silently accepting an unsupported setting. These labels do not select a Redis server parameter.
+
+Read strategy, monotonic settings, groups, and acknowledgment do not change this backend behavior. Future linearizable protocols still need their own validated recovery rules. The legacy spike retains historical replay controls and measurements outside this production scope.
 
 ## Data, writes, and recovery
 
-The [write behavior table](README.md#write-behavior) separates local acceptance, independent all-target placement, and future linearizable commit rules. Distribution, acknowledgment, and recovery remain distinct. Local acceptance must also establish replay capture when enabled. Future custom commit conditions are unselected; an Available read deadline returning null never implies an analogous successful write or rollback.
+The [write behavior table](README.md#write-behavior) separates local acceptance, independent all-target placement, and future linearizable commit rules. Distribution and acknowledgment remain distinct; delivery recovery follows the backend. Future custom commit conditions are unselected; an Available read deadline returning null never implies an analogous successful write or rollback.
 
 Use Redis Software 8.x with three primary data shards per regional database and additional replica shards. Pin exact builds, commands, client, persistence, expiry, capacity, and conflict behavior. Suggested immutable envelope key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`; a local candidate hint may use `session:{opaque-session-id}:available`. The hint key name is storage plumbing, not the read fan-out policy.
 
@@ -79,7 +87,7 @@ The envelope binds session identity, schema, generation, record ID, payload, dig
 
 Serialize a logical update as required by its business rules, allocate operation/record IDs once, and reuse them on retries. Copy the same envelope to destinations without repeating business mutations or resetting expiry. On ambiguous write acknowledgment, reconcile the same IDs at the origin; do not claim rollback or exactly-once execution. Conflicting identity/content is an integrity error.
 
-Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; request-only sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
+Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; each same-session write sends its current version and may leave an idle region stale indefinitely after incomplete delivery. No unfinished delivery work is persisted for background repair. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
 
 ## Proposed monotonic modifier
 
@@ -130,7 +138,7 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R08 | Apply authorization, identity, integrity, generation, and expiry checks | V02, V14 |
 | R09 | Keep Local errors distinct; preserve Available outcome/error telemetry | V09, V14 |
 | R10 | Separate read-group membership from write acknowledgment targets | V10, V15 |
-| R11 | Preserve independent request-only and optional durable-replay contracts | V16, V17 |
+| R11 | Independent request-time fan-out has no background repair; Active-Active recovery is Redis-managed; reject obsolete recovery configuration | V16, V17, V21 |
 | R12 | Preserve local/all-target acknowledgment and uncertain outcomes | V12, V15 |
 | R13 | Validate restore/admission, expiry, retention, and configuration epochs | V18 |
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
@@ -141,4 +149,6 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. The monotonic modifier needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, persistence/retention, expiry/skew, and service levels remain unselected. The monotonic modifier needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+
+Local and Available inherit same-key causal operation ordering when Active-Active causal consistency is enabled. This backend ordering does not ensure a region has caught up or prevent a caller from reading older state after switching regions. With monotonic on, both strategies additionally enforce per-caller same-key non-regression using automatic read history; independent clusters need that enforcement too. Neither causal ordering nor monotonic reads guarantees the latest completed write. Same-key Redis ordering must not be assumed to order multiple snapshot/hint keys.

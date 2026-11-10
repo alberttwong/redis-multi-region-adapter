@@ -20,7 +20,7 @@ Available selects the local region's configured read group, or a validated expli
 
 ## Distribution choices
 
-Support Redis Software 8.x Active-Active or independent regional clusters with adapter fan-out. Active-Active owns replication/recovery; independent mode requires it in the application. Local acknowledgment is baseline; independent `all-targets` explicitly verifies the captured full target set. Independent recovery is separately chosen as request-only next-write refresh or optional durable replay. Without another write or retained replay obligation, an idle target may remain stale.
+Support Redis Software 8.x Active-Active or independent regional clusters with adapter fan-out. Active-Active owns replication recovery; independent mode uses bounded request-time fan-out with no background repair. Each later same-session write distributes its current value; without another write, missed delivery may stay unrepaired indefinitely. No separate recovery selector or durable replay option is planned. Local acknowledgment is baseline; independent `all-targets` verifies the captured full target set.
 
 A1 writing 42 does not make either read behavior wait for 42. Local reads the regional candidate; Available can obtain a value from any group member, including local, and an older first value can win. All-target write placement does not create linearizability. See [consistency.md](consistency.md), [backends.md](backends.md), and [spec.md](spec.md).
 

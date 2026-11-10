@@ -4,77 +4,49 @@ Status: proposed production Local/Available API with a legacy AWS spike. Availab
 
 ## Selected versus configurable
 
-**Selected:** `available` by default; explicit `local`. Available concurrently queries all group clusters including local and returns the first valid non-null value, or null on all-null completion/deadline without a value. Local reads only its regional candidate. Neither enforces RYOW, latest state, or shared ordering.
+**Selected:** `available` by default; explicit `local`; `monotonic: false` by default. Independent clusters have no background repair; Active-Active has Redis-managed replication recovery. Recovery follows the backend and has no separate selector. Neither base read strategy guarantees latest state or caller read-history ordering.
 
-**Still configurable:** distribution, independent acknowledgment, and independent recovery. A–E below are configuration presets for explaining outcomes, not a claim that one deployment preset has been chosen. `local` is the baseline acknowledgment; `all-targets` is opt-in. Independent recovery must be chosen explicitly.
-
-Field names are proposed configuration concepts, not a shipping SDK schema. Active-Active's application `recovery` is not applicable: Redis owns transport, so `recovery=not-applicable` below is descriptive rather than an extra SDK setting.
+**Still configurable:** distribution and independent acknowledgment. `local` is the baseline acknowledgment; `all-targets` is opt-in. Presets A, B, and D retain their historical identifiers; replay presets C/E belong only to the legacy spike and are outside production scope. Field names remain proposed API concepts, not a shipping SDK schema.
 
 ## Choose a configuration and see its outcome
 
-Each leaf contains the complete configuration and the resulting behavior. Preset identifiers stay the same in the failure diagram below.
-
 ```mermaid
 flowchart TD
-    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=available<br/><br/>Origin success; Redis distributes; Available races the read group including local; value or null"]
+    Start{"distribution?"} -->|active-active| A["Preset A: Active-Active; local acknowledgment<br/>Redis-managed replication recovery; Available reads"]
     Start -->|independent| Ack{"acknowledgment?"}
-    Ack -->|local| LocalRecovery{"recovery?"}
-    LocalRecovery -->|request-only| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Origin success; next same-session write distributes only its latest version"]
-    LocalRecovery -->|durable-replay| C["Preset C<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Origin success after recoverable capture; worker finishes missing copies"]
-    Ack -->|all-targets| AllRecovery{"recovery?"}
-    AllRecovery -->|request-only| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
-    AllRecovery -->|durable-replay| E["Preset E<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Success only after every target verifies; worker retains unfinished delivery"]
+    Ack -->|local| B["Preset B: independent; local acknowledgment<br/>No background repair; Available reads"]
+    Ack -->|all-targets| D["Preset D: independent; all-target acknowledgment<br/>No background repair; Available reads"]
 ```
 
-All five presets default to the same Available read contract. Explicit `local` can be used with any preset. Available read groups and write acknowledgment targets remain separate. Active-Active plus adapter `all-targets` is not specified in this phase. Durable replay is optional in independent mode and is not implied by local acknowledgment.
+All three presets default to Available. Explicit Local can be used with any preset. Available read groups and write acknowledgment targets remain separate. Active-Active plus adapter all-target acknowledgment is not specified in this phase.
 
-B and D attempt distribution again on the next insert/update for the same session. They send only its latest version, without resending earlier versions. With no later write, a region can remain stale. All-target verification proves placement at acknowledgment under its contract, not permanent availability, atomic visibility, or linearizable geographic consistency.
+Every independent same-session write distributes its current version as normal fan-out. It need not restore historical gaps. With no later write, a missed delivery can remain unrepaired indefinitely. All-target verification proves placement at acknowledgment, not permanent availability, atomic visibility, or linearizability.
 
 ## Benefits and costs of each deployment choice
 
-These are design tradeoffs, not measured latency or cost claims. Distribution, acknowledgment, and recovery can be combined; choosing one does not choose the others.
-
 ```mermaid
 flowchart TD
-    Choices["Deployment tradeoffs"] --> AA["Active-Active"]
-    AA --> AAPro["Benefit: Redis owns regional transport and conflict convergence"]
-    AA --> AACost["Cost: product-specific setup and data semantics; group-racing Available still requires adapter fan-out"]
-    Choices --> Independent["Independent databases with adapter fan-out"]
-    Independent --> IPro["Benefit: explicit destination and delivery control; no Active-Active transport dependency"]
-    Independent --> ICost["Cost: own idempotency, partial outcomes, hint selection, and region lifecycle"]
-    Choices --> Local["Local acknowledgment"]
-    Local --> LPro["Benefit: remote availability does not gate write success"]
-    Local --> LCost["Cost: reads may return old values or null"]
-    Choices --> All["All-target acknowledgment"]
-    All --> APro["Benefit: every captured target verifies the snapshot before success"]
-    All --> ACost["Cost: slowest target controls latency; one missing target prevents success"]
-    Choices --> Request["Request-only recovery"]
-    Request --> RPro["Benefit: no durable outbox or replay worker; next write refreshes state"]
-    Request --> RCost["Cost: idle sessions can stay stale; missed exact snapshots may remain missing"]
-    Choices --> Durable["Durable replay recovery"]
-    Durable --> DPro["Benefit: saved delivery resumes after restart without another write"]
-    Durable --> DCost["Cost: atomic capture, worker, backlog capacity, retention, and monitoring"]
+    Choices["Deployment tradeoffs"] --> AA["Active-Active: Redis owns transport and convergence<br/>Requires product-specific setup and data semantics"]
+    Choices --> Independent["Independent: explicit adapter fan-out<br/>Own idempotency, partial outcomes, and region lifecycle; no background repair"]
+    Choices --> Local["Local acknowledgment: remote availability does not gate success<br/>Reads can return stale values or null"]
+    Choices --> All["All-target acknowledgment: every captured target verifies before success<br/>Slowest target controls latency; missing target prevents success"]
 ```
 
-Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
-
-The [write behavior table](README.md#write-behavior) compares local/all-target acknowledgment and future custom commit protocols; distribution and recovery stay separate.
+Distribution and acknowledgment are separate choices. No application outbox capture or repair worker is planned. Local acknowledgment permits incomplete regional delivery; all-target acknowledgment reports partial/uncertain outcomes when required placement cannot be verified. Neither supplies linearizability or current revocation checks. See the [write behavior table](README.md#write-behavior).
 
 ## Version 42 when Region B is unavailable
 
-The setup is identical at every leaf: client A1 in `us-west-2` has written 42, target `us-east-1` used by B1 is unavailable, and the configured write deadline is finite. B is in the captured target set for all-targets presets. Partial copies are not rolled back.
+Client A1 in `us-west-2` writes 42 while target `us-east-1`, used by B1, is unavailable. The write deadline is finite, and B remains in the captured all-target set.
 
 ```mermaid
 flowchart TD
-    Write["A1 writes 42 in us-west-2; target us-east-1 unavailable"] --> Preset{"Which configuration preset?"}
-    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=available<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
-    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
-    Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Write may succeed after recoverable capture; worker retries B"]
-    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=available<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
-    Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
+    Write["A1 writes 42; target us-east-1 unavailable"] --> Preset{"Configuration preset?"}
+    Preset -->|A| A["Active-Active; local acknowledgment<br/>Write may succeed locally; Redis handles delayed delivery"]
+    Preset -->|B| B["Independent; local acknowledgment<br/>Write may succeed locally; no background repair"]
+    Preset -->|D| D["Independent; all-target acknowledgment<br/>No success at deadline; partial/uncertain outcome; no rollback"]
 ```
 
-For A–C, local success permits regional lag. Available can still find a value in another member of its read group, including the origin, but it accepts a stale first value and may return null at deadline. Local reads only their regional candidate. D–E report partial/uncertain write outcomes when a required target does not verify; copies are not rolled back and later updates do not retroactively acknowledge that write.
+Available can find a value in another read-group member, including the origin, but may accept a stale first value or return null at deadline. Local reads only its regional candidate. Each later independent same-session update distributes its current value; it does not retroactively acknowledge an earlier uncertain write.
 
 ## Read configuration and outcomes
 
@@ -82,7 +54,7 @@ The effective policy is the request override or configured `readPolicy`, initial
 
 ```mermaid
 flowchart TD
-    Read["Read with preset A-E"] --> Policy{"Effective readPolicy?"}
+    Read["Read with preset A, B, or D"] --> Policy{"Effective readPolicy?"}
     Policy -->|local| Local["Query local only; valid value or null; infrastructure errors remain errors"]
     Policy -->|available: default| Group["Capture selected group including local; dispatch all concurrently"]
     Group --> Race{"First completion or deadline?"}
@@ -99,7 +71,7 @@ An early null never wins over a later value within the deadline. Invalid groups/
 
 ## Estimating p99 for each preset
 
-Use the [p99 estimation model](latency.md) to turn a selected configuration into a client-visible latency estimate. A/B acknowledge the origin path, C additionally requires recoverable capture, and D/E wait for the slowest required remote verification path. These are critical-path descriptions, not measured latency rankings.
+Use the [p99 estimation model](latency.md) for a selected configuration. A/B acknowledge the origin path; D waits for the slowest required remote verification path. These describe critical paths, not measured rankings.
 
 Local p99 includes one regional lookup. Available value latency follows the first valid non-null response, whereas all-null latency follows the last null response. If no value arrives and a member remains unavailable, the shared deadline bounds the result. Report all-null/deadline-null/error rates beside p99 and avoid adding component p99s or averaging regional p99s. The legacy AWS baseline measures different read controls; it does not predict the new Available race.
 
@@ -126,7 +98,6 @@ const groups = {
 const configuration = {
   distribution: "independent",
   acknowledgment: "local",
-  recovery: "request-only",
   readPolicy: "available",
   monotonic: false, // Optional guarantee; true needs the proposed history integration.
   targets,
@@ -144,7 +115,7 @@ const sessionsD1 = createSessionStore({ ...configuration, localRegion: "eu-west-
 const sessionsE1 = createSessionStore({ ...configuration, localRegion: "eu-central-1", readGroup: "EU" });
 ```
 
-This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1/D1/E1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and no application recovery setting.
+This selects **configuration preset B**, not client B1. Presets A/B/D describe deployment choices; client names A1/A2/B1/C1/D1/E1 identify callers. Preset D changes acknowledgment to `"all-targets"`. Preset A uses provisioned Active-Active with local acknowledgment. Delivery recovery follows the backend without a recovery selector. Legacy replay presets C/E remain experimental only.
 
 The five regional databases have fifteen primary shards before replicas. A1/A2 share the west regional database, so six clients do not add six regional targets. Baseline local acknowledgment does not wait for either the whole origin group or the foreign group. In this sample, changing acknowledgment to all-targets would verify the five configured targets; a separate origin-group acknowledgment set would need an explicit design choice rather than being inferred from groups.
 

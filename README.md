@@ -18,7 +18,7 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 | Convergence | Meaning | Infrastructure |
 | --- | --- | --- |
-| **Eventual** | Copies may differ during delivery and converge when delivery completes. | Active-Active owns replication; independent clusters need adapter fan-out/recovery. Request-only delivery can leave gaps indefinitely without a later write. |
+| **Eventual** | Copies may differ during delivery and converge when delivery completes. | Active-Active owns replication; independent clusters need adapter fan-out. Without background repair or a later same-session write, missed delivery can leave gaps indefinitely. |
 
 ### Read behavior — Monotonic off (default)
 
@@ -26,8 +26,8 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 | Behavior | Main question | Backend | Ordering guarantee | Freshness guarantee | Read latency | Implementation status |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Local** / `local` | Does my local cluster have a value? | Independent or Active-Active, regardless of native causal configuration | **No** caller read-history ordering guarantee. | **None.** May return stale data or ordinary null. | **fast** | **S — Proposed.** One regional lookup using shared client/validation code. |
-| **Available** / `available` | Does any cluster in my group have a value? | Independent or Active-Active, regardless of native causal configuration | **No** caller read-history ordering guarantee. | **None.** May return stale data or ordinary null. | **slow** | **M — Proposed default.** Concurrent group fan-out, shared deadlines, validation, and loser cleanup. |
+| **Local** / `local` | Does my local cluster have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—same-key causal operation order** with Active-Active causal consistency enabled; otherwise no causal-order guarantee. No caller read-history ordering guarantee. | **None.** May return stale data or ordinary null. | **fast** | **S — Proposed.** One regional lookup using shared client/validation code. |
+| **Available** / `available` | Does any cluster in my group have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—same-key causal operation order** with Active-Active causal consistency enabled; otherwise no causal-order guarantee. No caller read-history ordering guarantee. | **None.** May return stale data or ordinary null. | **slow** | **M — Proposed default.** Concurrent group fan-out, shared deadlines, validation, and loser cleanup. |
 | **Linearizable over Active-Active** / `linearizable` | Does this read reflect writes completed before it began? | Active-Active + custom coordination | **Yes.** One real-time order per key within scope. | **Real-time freshness:** reflect writes completed before the read begins, within scope. Not implemented. | **slow++** | **XL — Deferred, unimplemented.** Custom ordering/commit/read protocol, fencing/failover, and fault validation; Active-Active supplies replication only. |
 | **Linearizable over Coordinated** / `linearizable-coordinated` | Does this read reflect writes completed before it began? | Independent clusters + custom coordination | **Yes.** One real-time order per key within scope. | **Real-time freshness:** reflect writes completed before the read begins, within scope. Not implemented. | **slow++** | **XL — Proposed, unimplemented.** Custom ordering/commit/read and independent-cluster recovery/failover protocol with fault validation. |
 
@@ -37,10 +37,12 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 | Behavior | Main question | Backend | Ordering guarantee | Freshness guarantee | Read latency | Implementation status |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Local** / `local` | Does my local cluster have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—per-caller non-regression** on the same key; no global total order. | **Last-observed freshness:** at least the caller's last tracked successful observation, once established; not necessarily latest completed writes. | **slow+** | **L — Proposed, unimplemented.** Automatic read-history enforcement on local state only; wait locally or fail if the floor cannot be met. |
-| **Available** / `available` | Does any cluster in my group have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—per-caller non-regression** on the same key; no global total order. | **Last-observed freshness:** at least the caller's last tracked successful observation, once established; not necessarily latest completed writes. | **slow+** | **L — Proposed, unimplemented.** Automatic read-history enforcement filters the group race; wait/fail if no eligible state arrives. |
+| **Local** / `local` | Does my local cluster have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—per-caller non-regression** on the same key; Active-Active also preserves causal operation order when enabled. No global total order. | **Last-observed freshness:** at least the caller's last tracked successful observation, once established; not necessarily latest completed writes. | **slow+** | **L — Proposed, unimplemented.** Automatic read-history enforcement on local state only; wait locally or fail if the floor cannot be met. |
+| **Available** / `available` | Does any cluster in my group have a value? | Independent or Active-Active, regardless of native causal configuration | **Yes—per-caller non-regression** on the same key; Active-Active also preserves causal operation order when enabled. No global total order. | **Last-observed freshness:** at least the caller's last tracked successful observation, once established; not necessarily latest completed writes. | **slow+** | **L — Proposed, unimplemented.** Automatic read-history enforcement filters the group race; wait/fail if no eligible state arrives. |
 | **Linearizable over Active-Active** / `linearizable` | Does this read reflect writes completed before it began? | Active-Active + custom coordination | **Yes.** One real-time order per key within scope. | **Real-time freshness:** reflect writes completed before the read begins, within scope. Not implemented. | **slow++** | **XL — Deferred, unimplemented.** Custom ordering/commit/read protocol, fencing/failover, and fault validation; Active-Active supplies replication only. |
 | **Linearizable over Coordinated** / `linearizable-coordinated` | Does this read reflect writes completed before it began? | Independent clusters + custom coordination | **Yes.** One real-time order per key within scope. | **Real-time freshness:** reflect writes completed before the read begins, within scope. Not implemented. | **slow++** | **XL — Proposed, unimplemented.** Custom ordering/commit/read and independent-cluster recovery/failover protocol with fault validation. |
+
+Backend causal ordering applies to both Local and Available: it preserves causally related operations on the same Redis key within each Active-Active instance. It does not make a lagging instance current or prevent cross-region read regression. For immutable snapshot/hint storage, validate the actual key mapping; same-key ordering is not a cross-key snapshot guarantee. See [Redis causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).
 
 Both tables have the same read strategies and columns; the setting changes the Local/Available guarantees, read latency, and effort estimates. The two Linearizable rows are identical because linearizability already implies monotonicity for sequential same-key operations within scope. An off flag cannot weaken that stronger contract.
 
@@ -69,17 +71,28 @@ Session and Causal read options have been removed. Monotonic tracks successful r
 
 ## Write behavior
 
-This table describes acknowledgment/commit behavior. Distribution and recovery are separate choices; Available is a read policy, not a write acknowledgment mode.
+This table describes acknowledgment/commit behavior. Distribution and acknowledgment are separate choices; Available is a read policy, not a write acknowledgment mode.
 
 | Write behavior | Backend | Success acknowledged when | Ordering / visibility guarantee | Write latency | Status |
 | --- | --- | --- | --- | --- | --- |
-| **Local acknowledgment** / `local` | Independent, or Active-Active (causal consistency on or off) | The origin accepts the update under the selected durability policy; independent durable replay also captures its obligation before success. | Remote regions may lag. The acknowledgment alone adds no global ordering; native causal order applies only when Active-Active causal consistency is enabled. | **fast** | Baseline. Replay capture adds work when enabled. |
+| **Local acknowledgment** / `local` | Independent, or Active-Active (causal consistency on or off) | The origin accepts the update under the selected durability policy. | Remote regions may lag. The acknowledgment alone adds no global ordering; native causal order applies only when Active-Active causal consistency is enabled. | **fast** | Baseline. No application replay capture or worker. |
 | **All-target acknowledgment** / `all-targets` | Independent clusters | Every target in the captured write set verifies the same identified update. | Placement at acknowledgment; not atomic visibility, disk durability, or linearizability. | **slow+** | Proposed independent option; one missing target prevents success. |
 | **Linearizable commit protocol** | Active-Active + custom coordination, or independent clusters + custom coordination | A future protocol establishes a safely ordered commit according to its authority/failure model. Exact commit rule remains unselected. | Target: the same real-time per-key guarantee for both linearizable implementations. Matching reads must use that protocol too. | **slow++** | Proposed/deferred; neither replication nor all-target placement alone provides it. |
 
-Latency labels are planning estimates; capture overhead, additional WAN phases, or deadlines can change the band. A timed-out all-target or custom commit is not success or rollback: preserve IDs and report the protocol's partial/uncertain/error outcome. Do not apply Available reads' timeout-null behavior to writes. The custom commit row is a future protocol responsibility, not an implemented `acknowledgment` value. The monotonic modifier is a read-only guarantee and does not add a write acknowledgment mode or advance its floor from writes alone.
+Latency labels are planning estimates; adapter overhead, additional WAN phases, or deadlines can change the band. A timed-out all-target or custom commit is not success or rollback: preserve IDs and report the protocol's partial/uncertain/error outcome. Do not apply Available reads' timeout-null behavior to writes. The custom commit row is a future protocol responsibility, not an implemented `acknowledgment` value. The monotonic modifier is a read-only guarantee and does not add a write acknowledgment mode or advance its floor from writes alone.
 
-**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Independent recovery:** request-only next-write refresh, or optional durable replay. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
+**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. Independent clusters have no background repair; Active-Active replication recovery is Redis-managed. These behaviors follow the backend, not a separate recovery selector or read-group choice. See [backends.md](backends.md).
+
+## Recovery
+
+Here, recovery means repairing incomplete inter-region delivery, not restarting or restoring Redis. There is no application background repair worker or configurable replay mode in the production scope. Delivery recovery follows the backend; write acknowledgment remains a separate choice.
+
+| Recovery | Backend | After incomplete delivery | Requires another write? |
+| --- | --- | --- | --- |
+| **No background repair** | Independent clusters | Bounded request-time fan-out; no persisted unfinished delivery obligations. Each later same-session write distributes its current value as normal write behavior. Without another write, a missed delivery can remain unrepaired indefinitely. | **Yes**, for another delivery attempt after the request ends. |
+| **Redis-managed** | Active-Active | Redis handles replication and catch-up under its configured persistence/recovery behavior. No application replay worker is added. | **No**, for Redis-managed replication recovery. |
+
+Recovery does not retroactively acknowledge an uncertain write, guarantee permanent availability, or create linearizability. Future Linearizable protocols must separately define commit recovery, authority/fencing, and failover; selecting a row here is not sufficient. See [backends.md](backends.md).
 
 ## Start here
 
@@ -89,9 +102,9 @@ Deployment has three separate choices:
 
 - **Distribution:** Redis Active-Active, or independent regional databases with adapter fan-out.
 - **Acknowledgment:** local by default; independent mode can explicitly wait for all configured targets.
-- **Recovery in independent mode:** request-only next-write refresh, or optional durable replay.
+- **Delivery recovery:** no background repair for independent clusters; Redis-managed for Active-Active. No separate recovery selector.
 
-Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
+Each insert/update for the same session sends its current version to all configured independent regions. This is normal write fan-out, not a next-write recovery mode. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
 The current production baseline covers `available` (default) and `local`. Proposed `monotonic: true` is an optional modifier on Local/Available and needs automatic caller read-history storage/transport and reliable state-order validation; both linearizable variants need custom protocols. Reject unimplemented/removed policies rather than silently weakening them. Causal consistency remains an optional native Active-Active backend setting, not a public read behavior or custom causal protocol workstream. It preserves same-key dependencies without guaranteeing caught-up reads. See [backends.md](backends.md#backend-causal-consistency-setting).
 
@@ -112,6 +125,6 @@ The current production baseline covers `available` (default) and `local`. Propos
 
 ## Status
 
-Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected. Group-racing Available is a revised production design; the legacy spike does not implement it.
+Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. Detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. Application background repair and durable replay are outside production scope. Group-racing Available is a revised production design; the legacy spike does not implement it.
 
 The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

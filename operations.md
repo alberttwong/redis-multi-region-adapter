@@ -18,14 +18,18 @@ Local/Available with `monotonic: false` require no caller-history floor. Propose
 
 ## Writes and recovery
 
-Independent request-only distributes the next same-session update's latest version and need not restore missing history. Idle regions can remain stale indefinitely. Optional durable replay must capture obligations before success, retain original expiry, retry idempotently, and apply backpressure before obligations are lost. Monitor backlog, oldest work, per-target progress, and expiry.
+Derive delivery recovery from the backend: independent clusters have no background repair; Active-Active uses Redis-managed replication recovery. There is no adapter recovery selector. Reject obsolete recovery configuration rather than silently accepting it.
+
+Each independent same-session write distributes its current value as normal fan-out. Idle regions may remain stale indefinitely after incomplete delivery. No application outbox or repair worker is planned. Monitor request-time delivery outcomes, per-target failures, and expiry; Redis-managed backlog/catch-up belongs to Active-Active operations.
 
 Local acknowledgment accepts the origin; explicit independent all-target success requires every captured target. Timeout is partial/uncertain, not rollback. Preserve original IDs and targets for reconciliation; a later write does not retroactively acknowledge an earlier one. Read groups and write participant sets remain separate.
 
 ## Restore, rollout, and evidence
 
-Restored/admitted targets need backend-specific readiness, integrity/expiry checks, and any selected replay catch-up protocol. Healthy connectivity does not prove freshness. Request-only admission has no historical-backfill promise. Preserve epochs and outstanding write obligations during changes.
+Restored/admitted targets need backend-specific readiness and integrity/expiry checks. Healthy connectivity does not prove freshness. Independent targets have no historical-backfill promise; Active-Active uses native catch-up. Preserve configuration epochs and identities needed to reconcile uncertain writes.
 
 Measure Local and Available at realistic group size/load, including null/error rates, all-attempt histograms, per-target latency, pool saturation, fan-out counts, cancellations, and late work. Rehearse first-null/later-value, all-null, deadline-null, stale-first, partial endpoint failure, membership changes, and winner cleanup. Rollout/rollback must preserve the documented policy behavior; no production release automation is installed by these documents.
 
 For future linearizable modes on either backend, use **slow++** for both read and write planning; record actual per-operation histograms separately rather than treating the label as an SLO. Active-Active provides eventual convergence. Linearizable coordination and immediate cross-device revocation remain separate deferred designs; neither a racing read nor all-target placement establishes them.
+
+Local and Available inherit same-key causal operation ordering when Active-Active causal consistency is enabled. This backend ordering does not ensure a region has caught up or prevent a caller from reading older state after switching regions. With monotonic on, both strategies additionally enforce per-caller same-key non-regression using automatic read history; independent clusters need that enforcement too. Neither causal ordering nor monotonic reads guarantees the latest completed write. Same-key Redis ordering must not be assumed to order multiple snapshot/hint keys.

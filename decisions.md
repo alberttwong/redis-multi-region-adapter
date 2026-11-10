@@ -1,6 +1,6 @@
 # Deployment and write-policy decisions
 
-Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Linearizable reads remain deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
+Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. The proposed stronger options are Causal over Active-Active, Causal over Coordinated, Linearizable over Active-Active, and Linearizable over Coordinated; implementation/validation remains open. Redis Software 8.x targets three primary shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
@@ -57,6 +57,8 @@ flowchart TD
 ```
 
 Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
+
+The [write behavior table](README.md#write-behavior) compares local/all-target acknowledgment and future custom commit protocols; distribution and recovery stay separate.
 
 ## Version 42 when Region B is unavailable
 
@@ -174,6 +176,9 @@ These reads have no caller version/context input. A local null can be followed b
 | --- | --- | --- |
 | Local | One regional read; avoids WAN read fan-out. | Can miss values present elsewhere; local errors remain errors. |
 | Available (default) | Can return a value from any selected group member including local without waiting for agreement. | More requests/connections; can return stale data or deadline-null despite a value elsewhere. |
-| Linearizable (deferred) | Would supply real-time ordering per key within its scope. | No validated protocol; Active-Active alone does not supply it. |
+| Causal over Active-Active | Native per-key causal ordering, with less custom ordering code. | Replicas may lag; native causal configuration and adapter checks are required. |
+| Causal over Coordinated | Same-key causal ordering over independent clusters. | Custom dependency/replication/recovery protocol remains unimplemented; no real-time freshness. |
+| Linearizable over Active-Active | Real-time order and freshness per key in scope. | Active-Active plus a custom validated coordination protocol; deferred. |
+| Linearizable over Coordinated | The same linearizable guarantee over independent clusters. | Custom validated ordering/commit/read/failure protocol; proposed and unimplemented. |
 
-Read policy selection never silently changes distribution, acknowledgment, or recovery. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
+Read policy selection never silently changes distribution, acknowledgment, or recovery. The guarantee/backend variants are explicit; reject unimplemented options and backend mismatches instead of falling back to Local/Available. The ambiguous `coordinated` policy is replaced by `causal-coordinated` and `linearizable-coordinated`. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).

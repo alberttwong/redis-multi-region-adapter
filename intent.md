@@ -8,7 +8,7 @@ Provide two production reads over regional copies: **Local** (`local`) queries o
 
 Available chooses a value by arrival time, not freshness. Either option may return stale data or miss a completed write; neither guarantees read-your-own-writes. Timeout-null is not proof that every cluster lacks the value. Keep authorization, integrity, expiry, deadlines, and per-attempt observability intact.
 
-The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. Linearizable behavior is deferred and requires a separately validated coordination protocol; Active-Active alone supplies eventual convergence.
+The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. **Causal over Active-Active** uses Redis's enabled per-key causal ordering; **Causal over Coordinated** targets that same ordering through custom application coordination over independent clusters. Neither guarantees regional catch-up. **Linearizable over Active-Active** and **Linearizable over Coordinated** target the same full real-time ordering/freshness per key using different replication backends and custom coordination. Those protocols are not implemented; native Active-Active causal ordering is not a linearizable guarantee.
 
 ## Topology and scope
 

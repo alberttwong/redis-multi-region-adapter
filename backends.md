@@ -2,11 +2,11 @@
 
 Status: proposed design. [spec.md](spec.md) defines behavior; [decisions.md](decisions.md) diagrams the choices and their benefits/costs. All combinations use Redis Software 8.x with three primary shards per regional database, replicas additional, and the same read-policy interface.
 
-A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`. US contains the three US regions; EU contains the two EU regions. Production reads carry no caller write-dependency context. A1/A2 share the example west regional database; the two local clients do not add a target or become separate regional targets. Fan-out targets databases/regions, not clients. It transports stored values between databases.
+A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-east-2`, D1 reads/writes `eu-west-1`, and E1 reads/writes `eu-central-1`. US contains the three US regions; EU contains the two EU regions. Local/Available reads carry no caller write-dependency context. A1/A2 share the example west regional database; the two local clients do not add a target or become separate regional targets. Fan-out targets databases/regions, not clients. It transports stored values between databases.
 
 ## Choose distribution
 
-Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. A possible linearizable overlay is unvalidated and deferred; independent-cluster linearizable designs are outside planned scope. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. Causal over Active-Active uses its native causal flag for same-key dependency ordering without regional catch-up. Causal over Coordinated targets that ordering through a custom protocol over independent clusters. Linearizable over Active-Active and Linearizable over Coordinated target the same real-time per-key guarantee; each needs a custom coordination protocol over its respective backend. All adapter/protocol integrations remain proposed or deferred, with no implemented freshness proof. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
 flowchart LR
@@ -22,6 +22,8 @@ Active-Active owns CRDT transport and convergence. Do not fan out the same non-i
 The independent option retains Redis Software 8.x; it does not establish a Redis Open Source support claim. A single-primary cross-region alternative has different write-routing constraints and is outside this proposal.
 
 ## Fan-out and acknowledgment
+
+The [write behavior table](README.md#write-behavior) summarizes baseline local/all-target acknowledgment and future custom causal/linearizable commit paths. Only `local` and independent `all-targets` are current proposed acknowledgment settings; custom rows need their own validated protocols, not an extra acknowledgment label. Available has no separate write mode.
 
 Every independent insert/update identifies its latest version and attempts delivery to all configured targets. Copies reuse its original ID, payload, digest, generation, and absolute expiry. Reapplying identical content is a no-op; conflicting identity/content is an integrity error. Copying must not repeat business-side mutations or trigger recursive re-export.
 

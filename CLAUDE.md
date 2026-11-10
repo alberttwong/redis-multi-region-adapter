@@ -14,12 +14,13 @@ Design documents plus an experimental AWS latency spike. Start with README.md, s
 
 - Default `available`: query all selected group members concurrently, including local. Return the first valid non-null value; null on all-null completion or shared deadline without a value. An early null never beats a pending value.
 - Explicit `local`: query only local; valid value or null, with infrastructure errors separate. Active-Active handles propagation, or independent mode uses adapter write fan-out.
-- Session reads have been removed from production scope. No caller write context, RYOW enforcement, successor proof, public exact-version selector, or `greedy` policy. Deferred `linearizable` is unsupported.
+- Session reads have been removed from production scope. No caller write context, RYOW enforcement, successor proof, public exact-version selector, or `greedy` policy. Proposed `causal`, `causal-coordinated`, `linearizable`, and `linearizable-coordinated` need validated adapter/protocol integration before use.
 - Available can return stale data; timeout-null is not proof of absence. Capture/validate groups including local; no silent target removal, sequential fallback, latest comparison, or write-back.
 - Cancel or discard losing/late results; bound concurrency, pools, deadlines, and request sizes. Validate authorization, key binding, generation, integrity, and expiry.
 - US: west/east-1/east-2; EU: eu-west-1/eu-central-1. A1/A2 share the west database; six clients mean five targets, fifteen primary shards before replicas. Read groups do not shrink all-target write obligations.
 - Independent request-only refreshes the next same-session update's current version. Optional durable replay captures obligations before success. Local acknowledgment is baseline; independent all-target verifies placement, not ordering/durability.
-- Active-Active is eventually consistent, not linearizable. A possible linearizable overlay remains unvalidated and deferred.
+- Causal over Active-Active uses native same-key ordering with causal consistency enabled; no custom ordering protocol, no regional catch-up guarantee. Causal over Coordinated targets that same-key causal order through a custom protocol on independent clusters.
+- Linearizable over Active-Active and Linearizable over Coordinated target identical real-time order/freshness per key in scope; both need custom protocols. The Coordinated variants use independent clusters. Reject unimplemented options and backend mismatches. Do not claim native Active-Active is linearizable, causal is fresh, or one unimplemented backend is inherently faster.
 - Preserve IDs on uncertain-write reconciliation. Internal placement misses may be described as **snapshot missing**; public Available misses/timeouts return null.
 - Never log payloads, credentials, bearer IDs, or raw tokens.
 

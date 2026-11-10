@@ -1,6 +1,8 @@
 # Multi-region session consistency
 
-Design for **Available reads by default** (`available`) and explicit **Local reads** (`local`) on **Redis Software 8.x**. Each regional database has three primary data shards, with replicas additional. The per-region sizing interpretation remains an assumption to confirm.
+**Available reads by default.**
+
+The design targets Redis Software 8.x. Each regional database has three primary data shards, with replicas additional. The per-region sizing interpretation remains an assumption to confirm.
 
 ## Consistency
 
@@ -14,13 +16,20 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 **Read behavior**
 
-| Behavior | Result | Implementation status |
-| --- | --- | --- |
-| **Local** / `local` | Read only the local cluster; return valid data or null. Redis Active-Active handles propagation, or the adapter handles it for independent clusters. | Proposed explicit option; no freshness guarantee. |
-| **Available** / `available` | Query every cluster in the selected group concurrently, **including local**. Return the first valid non-null value; return null when all replies are null or the deadline expires without a value. | **Default.** Remote null replies do not end the race while other requests are pending. |
-| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | Deferred and unsupported; requires a separately designed coordination protocol. |
+| Behavior | Backend | Result | Ordering | Freshness guaranteed? | Read / write latency | Implementation status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Local** / `local` | Independent or Active-Active | Read only local; valid data or null. | No cross-region ordering guarantee. | **No.** Local data may be stale. | **Read:** fast. **Write:** fast. | Proposed option. |
+| **Available** / `available` | Independent or Active-Active | Race all group clusters **including local**; first valid non-null value. Null on all-null replies or deadline without a value. | No cross-region ordering guarantee; first value by reply arrival. | **No.** The first value may be stale. | **Read:** slow. **Write:** fast. | **Default.** An early null does not end pending requests. |
+| **Causal over Active-Active** / `causal` | Active-Active with causal consistency enabled | Regional reads with Redis preserving causal dependencies on the same key. | Same-key causal order, native to Redis; no custom ordering protocol. | **No catch-up guarantee.** A region may lag. | **Read:** fast. **Write:** fast. | Native ordering; adapter/configuration integration proposed. |
+| **Causal over Coordinated** / `causal-coordinated` | Independent clusters + custom coordination | Target: preserve causal dependencies on the same key across group members. | Same-key causal order, enforced by a custom dependency/replication protocol. | **No catch-up guarantee.** Causal order allows stale regional reads. | **Read:** slow+. **Write:** slow+. | Proposed and unsupported; protocol remains unimplemented. |
+| **Linearizable over Active-Active** / `linearizable` | Active-Active + custom coordination | One real-time order per key; reads reflect writes completed before they begin. | Real-time ordering per key within scope; custom coordination required. | **Yes, by contract**, within scope. Not implemented. | **Read:** slow+. **Write:** slow+. | Deferred; Active-Active alone does not provide linearizability. |
+| **Linearizable over Coordinated** / `linearizable-coordinated` | Independent clusters + custom coordination | Same linearizable contract, implemented through an independent-cluster coordination protocol. | Real-time ordering per key within scope; custom coordination required. | **Yes, by contract**, within scope. Not implemented. | **Read:** slow+. **Write:** slow+. | Proposed and unsupported; ordering/commit/read/failover protocol remains unimplemented. |
 
-Neither Local nor Available guarantees the newest value or read-your-own-writes. Available chooses the first value, not the first reply if that reply is null. It may return older data even when another cluster has newer data. Timeout-null means no value was obtained within the deadline, not proof that the key is absent everywhere.
+Latency labels are planning estimates, not measurements: **fast** = regional path; **slow** = remote-response path; **slow+** = coordination across regions; **slow++** = extra sequential WAN coordination or a deadline wait. Local write acknowledgment is assumed where supported. Available can be fast when local wins or slow++ at timeout. Custom coordination ratings are provisional assumptions, not inherent costs of a guarantee; a causal protocol may replicate asynchronously, and final read/write paths are unselected. No speed ranking between the linearizable implementations is established. See [latency.md](latency.md).
+
+The causal options target the same **per-key causal ordering**, but only Active-Active supplies that ordering natively. The linearizable options target the same **real-time freshness and ordering per key**, using different backends. All custom coordination protocols require design and validation; choosing a label does not implement the guarantee.
+
+Local, Available, and both causal options do not guarantee the latest completed write across regions. Causal ordering preserves dependencies without proving a reader has caught up. Available chooses the first value, not the first null reply; it can return an old value even when another cluster has newer data. Timeout-null is not proof of absence everywhere. Linearizable options must wait or fail if their freshness requirement cannot be established; Available's timeout-null rule does not apply to them.
 
 **Cluster-group scope**
 
@@ -29,9 +38,24 @@ Neither Local nor Available guarantees the newest value or read-your-own-writes.
 | **Geographic group** | US: three US regions; EU: two EU regions | Available races the selected group's members, including the caller's local cluster. A future linearizable scope would require coordination within the group. |
 | **Global group** | An explicitly configured group containing all five regions | Available can race all five if that group is selected. Future global linearizability remains deferred. |
 
-Available uses the local region's configured read group unless a valid group override is provided. Membership must include the local cluster. Read groups do not change write acknowledgment targets. Active-Active provides strong eventual convergence, not linearizability; its possible use as the replication base of a linearizable design is unvalidated. See [consistency.md](consistency.md).
+Available uses the local region's configured read group unless a valid group override is provided. Membership must include the local cluster. Read groups do not change write acknowledgment targets. **Project backend mapping:** the “over Active-Active” options use Active-Active (causal consistency must be enabled for Causal); the “over Coordinated” options use independent clusters with custom protocols. Linearizability is the same target guarantee with either implementation. See [consistency.md](consistency.md).
 
-The Session read option has been removed. Production reads require no caller write context, successor proofs, or public exact-version selector. The [experimental spike](spike/README.md) retains historical controls and results; it does not implement this revised production API.
+The Session read option has been removed. Local/Available reads require no caller write context or successor proofs. There is no public exact-version selector. The [experimental spike](spike/README.md) retains historical controls and results; it does not implement this revised production API.
+
+## Write behavior
+
+This table describes acknowledgment/commit behavior. Distribution and recovery are separate choices; Available is a read policy, not a write acknowledgment mode.
+
+| Write behavior | Backend | Success acknowledged when | Ordering / visibility guarantee | Write latency | Status |
+| --- | --- | --- | --- | --- | --- |
+| **Local acknowledgment** / `local` | Independent or Active-Active | The origin accepts the update under the selected durability policy; independent durable replay also captures its obligation before success. | Remote regions may lag. The acknowledgment alone adds no global ordering; native causal order applies only when Active-Active causal consistency is enabled. | **fast** | Baseline. Replay capture adds work when enabled. |
+| **All-target acknowledgment** / `all-targets` | Independent clusters | Every target in the captured write set verifies the same identified update. | Placement at acknowledgment; not atomic visibility, disk durability, or linearizability. | **slow+** | Proposed independent option; one missing target prevents success. |
+| **Custom causal coordination** | Independent clusters | A future Causal over Coordinated protocol's dependency/acceptance conditions are satisfied. Exact acknowledgment rule remains unselected. | Target: same-key causal dependencies, not latest-write freshness. | **slow+** | Proposed and unimplemented; may allow asynchronous replication, so rating is provisional. |
+| **Linearizable commit protocol** | Active-Active + custom coordination, or independent clusters + custom coordination | A future protocol establishes a safely ordered commit according to its authority/failure model. Exact commit rule remains unselected. | Target: the same real-time per-key guarantee for both linearizable implementations. Matching reads must use that protocol too. | **slow+** | Proposed/deferred; neither replication nor all-target placement alone provides it. |
+
+Latency labels are planning estimates; capture overhead, additional WAN phases, or deadlines can change the band. A timed-out all-target or custom commit is not success or rollback: preserve IDs and report the protocol's partial/uncertain/error outcome. Do not apply Available reads' timeout-null behavior to writes. The two custom rows are future protocol responsibilities, not new implemented `acknowledgment` values.
+
+**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Independent recovery:** request-only next-write refresh, or optional durable replay. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
 
 ## Start here
 
@@ -45,7 +69,7 @@ Deployment has three separate choices:
 
 Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
-Public read policies are `available` (default) and `local`. `linearizable` is deferred and rejected as unsupported. There is no `session`, `required`, or `greedy` public policy.
+The current production implementation plan covers `available` (default) and `local`. Proposed labels are `causal`, `causal-coordinated`, `linearizable`, and `linearizable-coordinated`. They require validated adapter/configuration or custom protocol implementations before use; reject unimplemented options rather than weakening them. The ambiguous `coordinated` policy is replaced by its two explicit guarantees. Session/exact-version reads remain removed.
 
 ## AWS latency spike
 

@@ -2,6 +2,12 @@
 
 Status: planning model with an [experimental AWS measurement harness](spike/README.md). The [2026-11-09 baseline](spike/reports/aws-baseline-20261109.md) records real run results with sample counts and configuration; no production SLO or strict-consistency guarantee is inferred. Presets A–E and read policies refer to [decisions.md](decisions.md). This model does not select a deployment preset.
 
+## Qualitative latency labels
+
+The README uses four planning bands: **fast** for a regional path, **slow** for a remote-response path, **slow+** for inter-region coordination, and **slow++** for extra sequential WAN coordination or reaching the configured deadline. These are shorthand for assumed request paths, not measured milliseconds, fixed bounds, or guaranteed rankings.
+
+Under local acknowledgment, Local and Causal over Active-Active reads/writes are provisionally fast. Available reads are provisionally slow, but local winners can be fast and no-value deadlines slow++; its baseline writes remain fast. Causal over Coordinated and both Linearizable variants provisionally use slow+ for both reads and writes, assuming inter-region coordination; their unselected protocols could add slow++ paths or optimize some operations. All-target writes add remote waits. Revisit ratings after protocol selection and real measurements.
+
 ## Measure the right operation
 
 Measure from application invocation to its returned result, including middleware, pool queues, Redis/network work, group dispatch, retries, verification, and waiting. Report write acknowledgment, read response, and background delivery separately. A server command benchmark does not measure the proposed adapter's group-read or write fan-out path. Redis's [benchmarking guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/) discusses workload/client effects; its [latency guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/) distinguishes client/network and server sources of delay. Neither supplies this deployment's p99.
@@ -64,6 +70,12 @@ Available:   first valid non-null reply before d
 A first null must not stop the race. A first stale value must not wait for a newer value or quorum. Do not wait for cancellation/cleanup of slower requests before returning a winner; measure loser work, per-target request counts, pools, and late responses separately. Both non-null and null results may miss a completed write. Distinguish all-null, deadline-null, invalid configuration/authorization, and per-target errors in metrics.
 
 Available's new group-racing behavior is not measured by the legacy spike's `latest`/`any`/`required` runs. Keep historical reports and labels intact. Collect new client-side fan-out traces at representative load before making numeric claims for this API.
+
+## Guarantee/backend variants and latency
+
+Causal over Active-Active uses native causal-enabled replication and regional reads without a global freshness barrier. Local acknowledgment remains possible; causal tracking adds replication traffic/memory/performance overhead. Its ordering needs less custom code than Causal over Coordinated, which must implement causal dependency propagation/application/recovery on independent clusters. The latter can also use asynchronous replication; causal guarantees do not inherently impose synchronous WAN waits on every read/write.
+
+Linearizable over Active-Active and Linearizable over Coordinated target the same real-time freshness/ordering per key with different replication backends. Both need custom coordination and validated commit/read/failure paths. Coordination may add WAN communication on reads, writes, or both. All custom slow+ ratings are provisional path assumptions, not properties of the guarantees. Protocol-specific paths could be fast or slow++ instead. No benchmark or architectural proof ranks one linearizable implementation as faster.
 
 ## Why component p99 values cannot simply be added
 

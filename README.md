@@ -8,6 +8,16 @@ For example, a user creates a session in the US and their next request reaches E
 
 This proposed adapter gives applications one explicit contract for those decisions across Redis Active-Active databases or independent regional Redis clusters. It uses native Redis capabilities and existing clients, with adapter logic for regional reads and, where needed, write distribution.
 
+### Why doesn't Active-Active alone solve this?
+
+Redis Active-Active already handles multi-region replication, CRDT conflict resolution, and catch-up. Its [strong eventual consistency model](https://redis.io/docs/latest/operate/rs/databases/active-active/) allows regional copies to differ while updates propagate. A successful US write therefore does not mean a European read can see it yet. In the example above, Europe can still return null or an older session.
+
+Enabling [native causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) preserves causally related operation order on the same key. It does not establish that the region receiving a read has caught up, prevent a caller from seeing older state after switching regions, or provide linearizable reads.
+
+The remaining application decision is **where to look and what result to accept while regional copies differ**. This adapter proposes an explicit Local lookup or a concurrent Available group read with a shared deadline. On Active-Active, Redis continues to own replication and recovery; the adapter supplies that read behavior. Independent clusters additionally need adapter write fan-out.
+
+If local reads with eventual convergence meet the application's needs, Active-Active with an existing client may be sufficient. The adapter is useful when the application needs the explicit group-read contract. Available can find a session outside the local region, but an older value can still win; monotonic enforcement and linearizable coordination remain unimplemented extensions.
+
 ## What does it solve?
 
 - **Sessions that exist outside the local region:** the proposed default, **Available**, queries every database in a configured geographic or global group concurrently and returns the first valid non-null value within a shared deadline. An early local miss does not end the search.

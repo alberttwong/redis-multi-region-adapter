@@ -8,7 +8,7 @@ Provide two production reads over regional copies: **Local** (`local`) queries o
 
 Available chooses a value by arrival time, not freshness. Either option may return stale data or miss a completed write; neither guarantees read-your-own-writes. Timeout-null is not proof that every cluster lacks the value. Keep authorization, integrity, expiry, deadlines, and per-attempt observability intact.
 
-The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. Linearizable behavior is deferred and requires a separately validated coordination protocol; Active-Active alone supplies eventual convergence.
+The Session read option and its automatic context/lineage implementation have been removed from the production scope. Exact versions remain internal write/distribution metadata, not caller-selectable reads. Linearizable behavior requires Active-Active in this project plus a separately validated coordination protocol, and remains deferred; Active-Active alone supplies eventual convergence. A separate **Coordinated** option is proposed for independent, non-Active-Active clusters. It targets linearizable-like access, but its exact freshness/ordering contract and protocol are still open; no current guarantee is claimed.
 
 ## Topology and scope
 

@@ -20,7 +20,8 @@ The Session read option and its automatic context/lineage enforcement have been 
 | --- | --- | --- |
 | **Local** / `local` | Local cluster only | Valid local candidate or null; local infrastructure failures remain errors. |
 | **Available** / `available` (default) | Every member of the selected group, including local | First valid non-null value; null if all replies are null or the deadline expires without a value. |
-| **Linearizable** / `linearizable` (deferred) | A separately designed geographic/global coordination scope | Unsupported; reject rather than silently substitute another behavior. |
+| **Coordinated (independent clusters)** / `coordinated` (proposed) | Independent, non-Active-Active clusters in the selected geographic/global group | Target: linearizable-like access through application coordination; exact freshness/order/failure guarantees are unselected. Unsupported; reject rather than downgrade. |
+| **Linearizable** / `linearizable` (deferred) | Active-Active is required by this project's architecture, plus a geographic/global coordination protocol | Contract: real-time ordering per key. Unsupported until the additional protocol is designed and validated; Active-Active alone is insufficient. |
 
 Resolve policy from the request override or store configuration, initially `available`. A Local or Available read still checks caller authorization, session/key binding, integrity, generation policy, and expiry. Policy selection never bypasses access checks.
 
@@ -58,7 +59,7 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "available", group: "US" })` | Race all configured US members, including local, after validating group membership. |
 | `get(sessionId, { policy: "local" })` | Query only local. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, and deferred `linearizable`). There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, and unimplemented `coordinated`/`linearizable`). There is no public exact-version or caller-context read input.
 
 ## Data, writes, and recovery
 
@@ -72,7 +73,15 @@ Active-Active owns CRDT transport and strong eventual convergence. Independent m
 
 ## Linearizability and scope
 
-Linearizability per key requires one history respecting real-time operation order for all callers in its selected geographic/global scope. It remains deferred. Active-Active alone is eventually consistent and does not provide that guarantee. Its possible use as a future replication base is an unvalidated architecture direction; ordering authority, coordinated reads, fencing, partitions, and recovery need a separate protocol. Group metadata and all-target placement are insufficient.
+The **Linearizable** option requires `distribution=active-active` as a project architecture constraint. Its contract is one history per key respecting real-time operation order for all callers in the selected geographic/global scope. Active-Active provides eventual convergence alone; ordering authority, commit rules, safe reads, fencing, partitions, and recovery require an additional validated protocol. This mode remains deferred and unsupported. The backend requirement is a project rule, not a claim that independent clusters can never implement linearizability.
+
+## Proposed Coordinated option for independent clusters
+
+**Coordinated** (`coordinated`) is the recommended label for the requested linearizable-like option on `distribution=independent`. It is a separate proposed option, not a renamed Available race, an Active-Active feature, or a current guarantee of linearizability. “Weak linearizable” does not specify which freshness or ordering properties hold, so the project does not use that label.
+
+A candidate design would coordinate writes/reads through an application-managed authority and verify committed state before returning it. No authority mechanism, commit/read protocol, freshness bound, concurrent-write order, fencing/failover rule, or partition/deadline behavior has been selected. These must be specified and validated before claiming a guarantee or exposing the policy. A lock, majority of copies, or all-target placement alone is not such a protocol.
+
+Proposed backend compatibility is `coordinated` with independent clusters and `linearizable` with Active-Active. Both remain unsupported in this phase; reject either request and all mismatched combinations rather than silently mapping them to Local/Available. Neither changes the Available default, reinstates Session, or changes existing write acknowledgment sets. Future protocols must define any new commit participants explicitly.
 
 ## Outcomes and observability
 
@@ -99,7 +108,8 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R13 | Validate restore/admission, expiry, retention, and configuration epochs | V18 |
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
 | R15 | Measure end-to-end latency/outcome rates without leaking secrets | V13, V20 |
+| R16 | Record project backend constraints: Coordinated targets independent clusters; Linearizable requires Active-Active plus coordination. Both remain unsupported without validated protocols. | V21 |
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. The Coordinated option additionally needs a precise freshness/ordering contract and authority/commit/read/failure protocol; the Linearizable Active-Active overlay is also unvalidated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).

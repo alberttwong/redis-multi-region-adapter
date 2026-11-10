@@ -9,7 +9,7 @@ The production default is **Available** (`available`); **Local** (`local`) is ex
 | How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
 | How is a value read? | Local; Available (default) | One local candidate, or the first non-null candidate from a concurrent group race including local. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
-| Is shared ordering required? | Linearizable (deferred) | Needs a separately designed protocol within geographic/global scope. Group metadata alone is insufficient. |
+| Is stronger ordering required? | Coordinated on independent clusters (proposed); Linearizable on Active-Active (deferred) | Separate project modes; both need new protocols. Coordinated guarantees are undefined; Linearizable targets real-time order per key. |
 
 Neither supported read behavior provides RYOW, newest-value selection, or quorum agreement. Available can return a stale first value; timeout-null means no value arrived in time.
 
@@ -17,7 +17,16 @@ Neither supported read behavior provides RYOW, newest-value selection, or quorum
 
 Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Request-only refresh may leave idle regions stale indefinitely without another write.
 
-Active-Active alone does not provide linearizability. Its possible role as a future replication base is an unvalidated direction; real-time write ordering, safe reads, fencing, partitions, and recovery still require a separate protocol. Independent-cluster linearizable designs remain outside planned scope. There is no implemented linearizable overlay or validated shortcut from replication to strict ordering. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
+This project requires Active-Active for the **Linearizable** mode. Active-Active alone does not provide linearizability: real-time write ordering, safe reads, fencing, partitions, and recovery still require a separate validated protocol. **Coordinated** is a distinct proposed mode for independent, non-Active-Active clusters, targeting linearizable-like access through application coordination. Its precise freshness/ordering contract is not yet defined. These backend constraints are project choices; neither mode is implemented, and no guarantee follows from replication or placement alone. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
+
+## Proposed stronger read options
+
+| Option | Required backend in this project | Freshness / ordering status |
+| --- | --- | --- |
+| Coordinated | Independent clusters; no Active-Active | Linearizable-like target only. Authority, commit/read rules, ordering, failover, and timeout/partition semantics remain unspecified; no freshness guarantee is claimed. |
+| Linearizable | Active-Active plus a separate coordination overlay | Real-time ordering per key is the intended contract; the overlay is deferred and unvalidated. |
+
+“Coordinated” names the implementation approach without inventing a weaker form of linearizability. It is not a built-in Redis read setting, a quorum race, or the removed Session option. Both stronger options remain unsupported; geographic/global group settings alone enable neither.
 
 ## Reference topology
 

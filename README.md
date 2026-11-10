@@ -20,7 +20,8 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 | --- | --- | --- | --- |
 | **Local** / `local` | Read only the local cluster; return valid data or null. Redis Active-Active handles propagation, or the adapter handles it for independent clusters. | **No.** Local data may be stale. | Proposed explicit option. |
 | **Available** / `available` | Query every cluster in the selected group concurrently, **including local**. Return the first valid non-null value; return null when all replies are null or the deadline expires without a value. | **No.** The first non-null value may be stale. | **Default.** Remote null replies do not end the race while other requests are pending. |
-| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | **Yes.** Reflect writes completed before the read begins, within that scope. | Deferred and unsupported; requires a separately designed coordination protocol. |
+| **Coordinated (independent clusters)** / `coordinated` | Proposed application coordination for linearizable-like access across independent, non-Active-Active clusters in the selected group. | **Not yet defined or guaranteed.** Ordering, freshness, and partition behavior need a precise contract. | Proposed and unsupported; coordination protocol and validation remain open. |
+| **Linearizable** / `linearizable` | Reflect completed writes in one real-time order per key within the selected scope. | **Yes, by contract.** Reflect writes completed before the read begins, within that scope; this behavior is not implemented. | Deferred and unsupported. **Requires Active-Active in this project**, plus a separately designed coordination protocol. |
 
 Neither Local nor Available guarantees the newest value or read-your-own-writes. Available chooses the first value, not the first reply if that reply is null. It may return older data even when another cluster has newer data. Timeout-null means no value was obtained within the deadline, not proof that the key is absent everywhere.
 
@@ -31,7 +32,7 @@ Neither Local nor Available guarantees the newest value or read-your-own-writes.
 | **Geographic group** | US: three US regions; EU: two EU regions | Available races the selected group's members, including the caller's local cluster. A future linearizable scope would require coordination within the group. |
 | **Global group** | An explicitly configured group containing all five regions | Available can race all five if that group is selected. Future global linearizability remains deferred. |
 
-Available uses the local region's configured read group unless a valid group override is provided. Membership must include the local cluster. Read groups do not change write acknowledgment targets. Active-Active provides strong eventual convergence, not linearizability; its possible use as the replication base of a linearizable design is unvalidated. See [consistency.md](consistency.md).
+Available uses the local region's configured read group unless a valid group override is provided. Membership must include the local cluster. Read groups do not change write acknowledgment targets. **Project backend rule:** Linearizable requires Active-Active; Coordinated uses independent clusters. This is an architecture/naming constraint, not a general prerequisite for linearizability. Active-Active provides strong eventual convergence and still needs a validated coordination overlay for the Linearizable contract. See [consistency.md](consistency.md).
 
 The Session read option has been removed. Production reads require no caller write context, successor proofs, or public exact-version selector. The [experimental spike](spike/README.md) retains historical controls and results; it does not implement this revised production API.
 
@@ -47,7 +48,7 @@ Deployment has three separate choices:
 
 Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
-Public read policies are `available` (default) and `local`. `linearizable` is deferred and rejected as unsupported. There is no `session`, `required`, or `greedy` public policy.
+Supported design policies are `available` (default) and `local`. Proposed `coordinated` and deferred `linearizable` are rejected as unsupported until their protocols are implemented and validated. There is no `session`, `required`, or `greedy` public policy.
 
 ## AWS latency spike
 

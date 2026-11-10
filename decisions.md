@@ -1,6 +1,6 @@
 # Deployment and write-policy decisions
 
-Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Linearizable reads remain deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
+Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Coordinated reads are proposed for independent clusters with guarantees unselected; Linearizable requires Active-Active plus a coordination overlay and remains deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
@@ -174,6 +174,7 @@ These reads have no caller version/context input. A local null can be followed b
 | --- | --- | --- |
 | Local | One regional read; avoids WAN read fan-out. | Can miss values present elsewhere; local errors remain errors. |
 | Available (default) | Can return a value from any selected group member including local without waiting for agreement. | More requests/connections; can return stale data or deadline-null despite a value elsewhere. |
-| Linearizable (deferred) | Would supply real-time ordering per key within its scope. | No validated protocol; Active-Active alone does not supply it. |
+| Coordinated (proposed) | Targets linearizable-like access on independent, non-Active-Active clusters through application coordination. | Exact freshness/order/failure guarantees and the protocol are undefined; unsupported. |
+| Linearizable (deferred) | Would supply real-time ordering per key within its scope. | Requires Active-Active in this project plus a validated coordination overlay; Active-Active alone does not supply it. |
 
-Read policy selection never silently changes distribution, acknowledgment, or recovery. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
+Read policy selection never silently changes distribution, acknowledgment, or recovery. Proposed Coordinated targets independent clusters; deferred Linearizable requires Active-Active. These are project backend rules, not native guarantees. Both stronger policies remain unsupported; reject them rather than substituting Local/Available. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).

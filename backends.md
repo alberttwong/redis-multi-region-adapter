@@ -6,7 +6,7 @@ A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-e
 
 ## Choose distribution
 
-Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. A possible linearizable overlay is unvalidated and deferred; independent-cluster linearizable designs are outside planned scope. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
+Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. The project requires Active-Active for the Linearizable option, with an additional unvalidated coordination overlay. The separate proposed Coordinated option uses independent clusters; its linearizable-like target has no defined freshness/ordering guarantee yet. Both options remain unsupported until their respective protocols are specified and validated. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
 flowchart LR

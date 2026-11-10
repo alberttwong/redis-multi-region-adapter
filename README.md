@@ -2,30 +2,26 @@
 
 ## Why build this?
 
-An application running in several regions needs a clear answer to a simple question: **what should happen when the session it needs is missing or stale in the local Redis database?**
+**Redis Active-Active is the preferred model for multi-region Redis.** It provides regional reads and writes, CRDT conflict resolution, automatic replication and catch-up, and optional same-key causal ordering. It supplies a broader set of capabilities than application write fan-out. Use [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and an existing client when its native behavior meets the application's needs.
 
-For example, a user creates a session in the US and their next request reaches Europe before that session arrives there. A local lookup can return null even though another region has the session. If Europe has an older copy, the application must decide whether that value is acceptable. Replication, read routing, and the guarantees promised to the caller are separate decisions.
+This project defines a narrower session-access contract: **where should an application look for a session, how long should it wait, and what does a successful write mean?** That contract can sit on top of Active-Active. For deployments using independent regional clusters, the proposed adapter also distributes session updates itself, reproducing a reduced subset of Active-Active's capabilities. That alternative has no equivalent inter-region CRDT conflict resolution, native causal ordering, or automatic catch-up after missed delivery.
 
-This proposed adapter gives applications one explicit contract for those decisions across Redis Active-Active databases or independent regional Redis clusters. It uses native Redis capabilities and existing clients, with adapter logic for regional reads and, where needed, write distribution.
+For example, a user creates a session in the US and their next request reaches Europe before replication delivers it. Active-Active eventually converges, but the European lookup can still return null or older state. The adapter's proposed Available read searches a configured group for a valid value within a deadline. It can find a session outside Europe, while still allowing an older value to win. Native [causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) preserves same-key causal operation order; it does not make every regional copy current or preserve a caller's read history across regions.
 
-### Why doesn't Active-Active alone solve this?
+One active region with four passive read replicas can also be sufficient when one write region and stale regional reads are acceptable. [Asynchronous replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) leaves the same lag window, and remote writes must reach the active region. Reading everything from that region avoids replica lag during normal operation, with cross-region latency and dependence on that region.
 
-Redis Active-Active already handles multi-region replication, CRDT conflict resolution, and catch-up. Its [strong eventual consistency model](https://redis.io/docs/latest/operate/rs/databases/active-active/) allows regional copies to differ while updates propagate. A successful US write therefore does not mean a European read can see it yet. In the example above, Europe can still return null or an older session.
-
-Enabling [native causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) preserves causally related operation order on the same key. It does not establish that the region receiving a read has caught up, prevent a caller from seeing older state after switching regions, or provide linearizable reads.
-
-The remaining application decision is **where to look and what result to accept while regional copies differ**. This adapter proposes an explicit Local lookup or a concurrent Available group read with a shared deadline. On Active-Active, Redis continues to own replication and recovery; the adapter supplies that read behavior. Independent clusters additionally need adapter write fan-out.
-
-If local reads with eventual convergence meet the application's needs, Active-Active with an existing client may be sufficient. The adapter is useful when the application needs the explicit group-read contract. Available can find a session outside the local region, but an older value can still win; monotonic enforcement and linearizable coordination remain unimplemented extensions.
+**Infrastructure cost is part of the choice.** Five regional copies require memory and compute in five regions, plus configured HA replicas, persistence/backups, replication traffic, and operations. Active-Active has [additional sizing overhead](https://redis.io/docs/latest/operate/rs/databases/active-active/planning/) supporting its broader capabilities. The adapter adds read fan-out traffic and, for independent clusters, write fan-out and application maintenance. Compare deployment sizing and licensing or service quotes alongside engineering and operations costs; a reduced feature set does not guarantee lower total cost. A smaller read group alone does not reduce stored copies or write targets.
 
 ## What does it solve?
 
-- **Sessions that exist outside the local region:** the proposed default, **Available**, queries every database in a configured geographic or global group concurrently and returns the first valid non-null value within a shared deadline. An early local miss does not end the search.
-- **Choosing regional read scope:** **Local** keeps a lookup in one region; **Available** searches the configured group, including local. Applications can make that tradeoff explicitly.
-- **Knowing what a successful write means:** the design separates delivery from acknowledgment. Active-Active supplies Redis-managed replication; independent clusters need adapter fan-out. Local acceptance and proposed all-target verification have different success conditions.
-- **Understanding consistency and failure behavior:** the contract states when reads may be stale, when they return null or an error, and who handles missed delivery. This gives application teams a shared behavior to implement and validate.
+The proposed adapter makes session access explicit across either backend:
 
-**Scope today:** this repository contains a design and a legacy AWS spike, with no production SDK for the revised API. Local and Available can return stale data and do not guarantee read-your-own-writes. Automatic monotonic reads and linearizable protocols are future, unimplemented extensions. The detailed choices and limits follow below.
+- **Where reads look:** Local queries one regional database. Available concurrently queries every member of a configured geographic or global group, including local; an early local miss does not end the search.
+- **How long reads wait:** Available returns the first valid non-null value within a shared deadline, or null if every member returns null or no value arrives in time. Deadline-null does not prove the session is absent everywhere.
+- **How writes reach other regions and when they succeed:** Active-Active owns replication and catch-up. The reduced independent-cluster alternative uses adapter fan-out, local acceptance by default, or proposed all-target verification. Missed independent delivery has no background repair and can remain incomplete without another write to that session.
+- **Which guarantees the application can rely on:** Local and Available may return stale state. Neither supplies read-your-own-writes, caller monotonicity, or linearizability. The adapter's baseline adds a read contract without strengthening Active-Active's consistency guarantees.
+
+**Status:** this is a design and legacy AWS spike, with no production SDK for the revised API. Automatic monotonic enforcement and linearizable protocols remain unimplemented extensions. Independent fan-out is a limited alternative to the preferred Active-Active model.
 
 **Available reads by default, with monotonic off.** A proposed adapter for Redis Enterprise (Redis Software 8.x) across regional databases.
 
@@ -55,7 +51,7 @@ If local reads with eventual convergence meet the application's needs, Active-Ac
 | **Read-history guarantee** | 2 | **Off** (`monotonic: false`); proposed **On** (`monotonic: true`) | **Off**. On applies to Local/Available; linearizability already implies sequential same-key non-regression. |
 | **Read scope** | 1 | Local; geographic group; explicit global group | Available's configured group must include local. Future linearizable scope is protocol-defined. |
 | **Read deadline** | 5 | Finite configured budget; proposed `readDeadlineMs` for Available | **No default duration selected.** One shared budget for the group race. |
-| **Write distribution** | 6 | **Redis-managed** (Active-Active); **Adapter fan-out** (independent) | Backend must be selected. Read groups do not change write targets. |
+| **Write distribution** | 6 | **Redis-managed** (Active-Active); **Adapter fan-out** (independent) | **Active-Active preferred**; backend must be configured explicitly. Independent fan-out is a reduced-capability alternative. Read groups do not change write targets. |
 | **Native causal consistency** | Supporting setting | **Off** or **On** for Active-Active | No project-selected flag default. Same-key causal order does not supply caller monotonicity or linearizability. |
 | **Write acknowledgment** | 7 | `local`; `all-targets` (independent only) | **Local**. All-target placement is not linearizability. |
 | **Commit guarantee** | 8, paired with 3–4 | Baseline acknowledgment; future **Linearizable commit protocol** | No baseline custom commit protocol; stronger mode requires coordinated reads and writes. |

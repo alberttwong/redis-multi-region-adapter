@@ -1,15 +1,15 @@
 # Consistency and regional read behavior
 
-The production default is **Available** (`available`); **Local** (`local`) is explicit. Session and Causal read options have been removed; Monotonic is proposed. [spec.md](spec.md) owns exact behavior. The [AWS spike](spike/README.md) is a legacy experiment, not the revised production API.
+The production default is **Available** (`available`); **Local** (`local`) is explicit. Session and Causal read options have been removed; an optional monotonic guarantee on Local/Available is proposed. [spec.md](spec.md) owns exact behavior. The [AWS spike](spike/README.md) is a legacy experiment, not the revised production API.
 
 ## Separate propagation, reads, and scope
 
 | Question | Choices | Meaning |
 | --- | --- | --- |
 | How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
-| How is a value read? | Local; Available (default); proposed Monotonic | One local candidate, a first-value group race, or a group race constrained by automatic read history. |
+| How is a value read? | Local; Available (default) | The base strategy selects one local candidate or a concurrent group race. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
-| Is stronger ordering required? | Monotonic on either backend; Linearizable over either named backend | Monotonic prevents caller read regression; Linearizable targets real-time freshness across callers. |
+| Is stronger ordering required? | Monotonic on/off modifier for Local/Available; Linearizable over either named backend | The modifier prevents caller read regression without changing the source scope; Linearizable targets real-time freshness. |
 
 Neither supported read behavior provides RYOW, newest-value selection, or quorum agreement. Available can return a stale first value; timeout-null means no value arrived in time.
 
@@ -23,15 +23,15 @@ Both Linearizable implementations are rated **slow++** for reads and writes in t
 
 ## Main questions and guarantees
 
-| Behavior | Main question | Guarantee |
+| Strategy / optional guarantee | Main question | Guarantee |
 | --- | --- | --- |
 | Local | Does local have a value? | No read-history/freshness floor. |
 | Available | Does any group member have a value? | First valid non-null value, including local; no freshness/history floor. |
-| Monotonic (proposed) | Can I read without going backward from what I have seen? | Same or proven later state than the caller's last tracked successful read, on either backend. |
+| Optional monotonic guarantee (proposed) | Can I read without going backward from what I have seen? | Same or proven later state than the caller's last tracked successful read, on either backend. |
 | Linearizable over Active-Active | Does this read reflect completed writes? | Real-time order/freshness per key in scope, via a custom protocol over Active-Active. |
 | Linearizable over Coordinated | Does this read reflect completed writes? | The same guarantee, via a custom protocol over independent clusters. |
 
-After observing 42, Monotonic rejects older 41 but may still return 42 when newest 43 is elsewhere. It needs automatic caller read-history tracking and an accepted ordering/proof relation on both backends. It searches the group for eligible state and waits/fails if an established floor cannot be honored; Available's deadline-null rule must not silently weaken it. Its tracked successful reads establish the floor, not unread writes or untracked reads. No Session/RYOW read policy is restored.
+After observing 42, Monotonic rejects older 41 but may still return 42 when newest 43 is elsewhere. It needs automatic caller read-history tracking and an accepted ordering/proof relation on both backends. With Local it only searches/rechecks local state; with Available it filters the group race. It waits/fails if an established floor cannot be honored; Available's deadline-null rule must not silently weaken it. Successful reads with the modifier on establish its floor, not unread writes or untracked off-reads. Turning it off permits base-strategy reads without lowering the retained floor. No Session/RYOW read policy is restored.
 
 Native Active-Active causal consistency remains an optional backend setting. It preserves same-key causal dependencies as data propagates, but can leave a region behind and does not ensure a caller's later regional read meets its previous observed floor. It is not a public read option or a custom causal implementation workstream. See [backend settings](backends.md#backend-causal-consistency-setting).
 
@@ -42,7 +42,7 @@ The six independent clients write from these regions. Local reads use their regi
 - **US group:** A1/A2 in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`.
 - **EU group:** D1 in `eu-west-1`, E1 in `eu-central-1`.
 
-Clients do not share application write context or a latest-version directory. Local/Available reads carry no caller history; proposed Monotonic carries automatic read-history state. A1/A2 share one logical regional Redis database in this example, with separate application instances. Actual cell/endpoint placement must be confirmed. Five regional databases with three primary shards each mean fifteen primary shards before replicas; six clients do not mean six databases.
+Clients do not share application write context or a latest-version directory. Local/Available with the modifier off carry no caller history; enabling the proposed modifier adds automatic read-history state. A1/A2 share one logical regional Redis database in this example, with separate application instances. Actual cell/endpoint placement must be confirmed. Five regional databases with three primary shards each mean fifteen primary shards before replicas; six clients do not mean six databases.
 
 ```mermaid
 flowchart LR

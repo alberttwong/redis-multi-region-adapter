@@ -1,6 +1,14 @@
 # Multi-region session consistency
 
-Documentation-only repository. Start with README.md, then spec.md and plan.md. No application build, test, lint, or deployment commands exist. Add verified commands after the implementation stack is selected.
+Design documents plus an experimental AWS latency spike. Start with README.md, spec.md, plan.md, and spike/README.md. The spike is not the production SDK or a strict geographic protocol.
+
+## Spike commands
+
+- Setup: `python3 -m venv spike/.venv` then `spike/.venv/bin/pip install -r spike/requirements.lock.txt`.
+- Tests: `PYTHONPATH=spike spike/.venv/bin/python -m unittest discover -s spike/tests -v` (all tests pass).
+- Terraform: `terraform -chdir=spike/infra fmt -check -recursive` and `terraform -chdir=spike/infra validate`.
+- Deployment and run commands: spike/README.md. Confirm the account, cost, artifact/secret ARNs, and pinned installer before apply.
+- Keep Terraform state, plans, local inventory/results, raw license, and credentials outside Git. Secret values must not enter Terraform inputs/state or SSM command text.
 
 ## Required behavior
 

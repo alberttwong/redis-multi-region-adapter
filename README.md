@@ -13,7 +13,7 @@ Design for **latest local with read-your-own-writes**, named `latest-local-ryow`
 
 Active-Active is the infrastructure direction for future strict modes to avoid building regional replication and convergence ourselves; it is a project architecture choice, not a theoretical prerequisite for linearizability. Redis documents Active-Active as **strong eventual consistency**, with optional causal ordering. Neither guarantees immediate cross-region visibility after acknowledgment. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and the [infrastructure comparison](consistency.md#infrastructure-by-consistency-level).
 
-Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. This is a design-only repository, so coverage describes intended behavior rather than an implemented guarantee. See [consistency.md](consistency.md).
+Independent regional clients do not exchange context or version IDs. Each client gets RYOW protection from its own writes; it cannot know another client’s unpropagated version exists. Exact-version and any-version reads are explicit alternatives; neither changes the project's consistency target. Coverage describes the production design; the experimental AWS spike exercises a subset without establishing a production guarantee. See [consistency.md](consistency.md).
 
 ## Start here
 
@@ -29,6 +29,10 @@ Without durable replay, the next insert/update for the same session sends its la
 
 Read policies are `latest` by default, explicit `required` for one exact version, and explicit `any` for any valid local candidate. None promises the latest completed update across all devices or regions.
 
+## AWS latency spike
+
+[spike/README.md](spike/README.md) documents the Terraform deployment, experimental regional runners, preset A–E measurements, and reproduction/teardown steps. It targets the latest verified Redis Software build, pinned to 8.2.6-25. The production session SDK and strict geographic protocol remain unimplemented.
+
 ## Supporting documents
 
 - [backends.md](backends.md): distribution, acknowledgment, and recovery obligations.
@@ -42,6 +46,6 @@ Read policies are `latest` by default, explicit `required` for one exact version
 
 ## Status
 
-Design documents only, updated 2026-11-09. No adapter, worker, infrastructure, application tests, or enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
+Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected.
 
 The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

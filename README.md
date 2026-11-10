@@ -20,6 +20,8 @@ The proposed adapter gives applications one explicit session-access contract acr
 
 **Available reads by default, with monotonic off.** A proposed adapter for Redis Enterprise (Redis Software 8.x) across regional databases.
 
+**Client integration:** The adapter must build on top of, or work with, the [official Redis clients](https://redis.io/docs/latest/develop/clients/). Initial targets are **Jedis for Java** and **redis-py for Python**. Each supported integration must preserve the same contract over either backend; production dependency versions and integration remain to be validated.
+
 **Status:** design plus a [legacy AWS spike](spike/README.md), updated 2026-11-09. No production SDK implements this revised API yet. Automatic monotonic enforcement and both linearizable protocols are unimplemented. Use Redis Enterprise native features and existing client facilities; custom baseline work is limited to the selected adapter behavior. [spec.md](spec.md) defines the contract.
 
 ## Questions and answers

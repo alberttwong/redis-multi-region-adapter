@@ -28,6 +28,8 @@ A1 writing 42 does not make either read behavior wait for 42. Local reads the re
 
 ## Prefer native Redis Enterprise capabilities
 
+Build the adapter on top of, or make it work with, the [official Redis clients](https://redis.io/docs/latest/develop/clients/), initially **Jedis for Java** and **redis-py for Python**. Preserve the same read/write contract across supported client integrations and reuse their existing facilities.
+
 Use Redis Enterprise native data/conflict semantics, persistence/durability, expiration, capacity/eviction, and existing client pooling/timeouts. Treat version/client selection, supported commands, configured groups, and limits as integration configuration, not new product features. Build only the selected baseline adapter behavior and necessary validation/cleanup. Automatic monotonic history and linearizable coordination remain deferred extensions requiring additional code; they are not supplied by the native baseline.
 
 ## Delivery and limits

@@ -4,7 +4,7 @@ Status: proposed production acceptance scenarios, not executed results. Requirem
 
 | Case | Requirements | Stimulus and expected observation |
 | --- | --- | --- |
-| V01 | R01 | Verify exact platform/client/build/commands, Active-Active or independent mode, three primaries per regional database plus replicas, five databases and six clients. |
+| V01 | R01 | Verify the adapter builds on top of, or works with, official Redis clients, initially Jedis for Java and redis-py for Python. Run matching adapter contract scenarios for each supported integration; verify public API integration and that adapter cleanup never closes caller-owned clients/pools. Verify exact platform/client/build/commands, Active-Active or independent mode, three primaries per regional database plus replicas, five databases and six clients. |
 | V02 | R02, R08 | Round-trip immutable envelopes; reject identity/content collisions, wrong key/session binding, generation violations, digest corruption, and invalid expiry. Preserve original expiry when copying. |
 | V03 | R03 | Omit policy with default configuration: Available dispatches all selected group members including local. Explicit Local contacts only its one regional endpoint. |
 | V04 | R03 | Put a value only in a remote member. Local returns null while Available obtains the remote value. No caller version/context input is needed. |

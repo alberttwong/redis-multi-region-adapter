@@ -4,6 +4,8 @@ Status: proposed production Local/Available API with a legacy AWS spike. Availab
 
 ## Selected versus configurable
 
+**Client integration requirement:** Build on top of, or work with, the [official Redis clients](https://redis.io/docs/latest/develop/clients/). Initial targets are **Jedis for Java** and **redis-py for Python**; further official-client integrations must meet the same behavioral contract before support is claimed. Dependency versions and production integration remain to be validated.
+
 **Selected:** `available` by default; explicit `local`; `monotonic: false` by default. Independent clusters have no background repair; Active-Active has Redis-managed replication recovery. Recovery follows the backend and has no separate selector. Neither base read strategy guarantees latest state or caller read-history ordering.
 
 **Still configurable:** distribution and independent acknowledgment. `local` is the baseline acknowledgment; `all-targets` is opt-in. Presets A, B, and D retain their historical identifiers; replay presets C/E belong only to the legacy spike and are outside production scope. Field names remain proposed API concepts, not a shipping SDK schema.
@@ -77,7 +79,7 @@ Local p99 includes one regional lookup. Available value latency follows the firs
 
 ## Example code: configuration, writes, and reads
 
-These TypeScript snippets illustrate the **proposed API**. No SDK, `createSessionStore` implementation, import package, or executable example exists yet. Endpoint values, groups, and read deadlines come from deployment configuration. Provision Redis Software 8.x with three primary data shards per regional database; shard count is not an adapter setting.
+These TypeScript-style snippets are **language-neutral API pseudocode**, not a TypeScript SDK proposal. The adapter builds on top of, or works with, official Redis clients, initially **Jedis for Java** and **redis-py for Python**; language-specific signatures and packaging remain to be defined. No SDK, `createSessionStore` implementation, import package, or executable example exists yet. Endpoint values, groups, and read deadlines come from deployment configuration. Provision Redis Software 8.x with three primary data shards per regional database; shard count is not an adapter setting.
 
 ### Configure six clients in US and EU groups: preset B
 

@@ -4,7 +4,7 @@ Status: proposed production requirements. The [legacy AWS spike](spike/README.md
 
 ## Configuration and scope
 
-Record exact Redis Software/client builds, three primaries per regional database plus replicas, persistence, expiry, capacity, local endpoint, allowed groups, default read group, shared read deadline, and concurrency/pool limits. US has three regional clusters; EU two; global is explicit. Available groups must include local and resolve to distinct known endpoints. Six clients on five databases do not mean six targets.
+Record exact Redis Software builds and supported official Redis client dependency versions (initially Jedis for Java and redis-py for Python), client/pool ownership, three primaries per regional database plus replicas, persistence, expiry, capacity, local endpoint, allowed groups, default read group, shared read deadline, and concurrency/pool limits. US has three regional clusters; EU two; global is explicit. Available groups must include local and resolve to distinct known endpoints. Six clients on five databases do not mean six targets.
 
 Default policy is `available`; explicit `local` reads only local. Capture membership/epoch at dispatch. Reject malformed or unauthorized groups before sending reads. Read groups do not shrink captured all-target write obligations or add a foreign-group wait to local write acknowledgment.
 

@@ -6,7 +6,11 @@ Inputs: [intent.md](intent.md), [sources.md](sources.md). Proof: [validation.md]
 
 ## Implementation boundary
 
-Use Redis Enterprise (Redis Software) native capabilities and existing compatible client facilities. Configure and document their behavior instead of implementing replacements for conflict resolution, persistence/durability, expiration, eviction/capacity, connection pooling, or transport timeouts. Pin a deployed version/client and verify supported commands; this does not require building a new SDK or database feature.
+The adapter must build on top of, or work with, the [official Redis clients](https://redis.io/docs/latest/develop/clients/). Initial integration targets are **Jedis for Java** and **redis-py for Python**; the integration boundary must allow other official clients without changing the adapter contract. Each supported integration must preserve the same public behavior over Active-Active and independent regional clusters. Pin and validate exact production dependency versions for each integration before claiming support.
+
+Integrate through the client's public APIs, including application-supplied client instances or pools where compatible. Reuse client connection, authentication/TLS, pooling, timeout, and topology facilities where provided. Define ownership and cleanup explicitly: the adapter must not close caller-owned clients or pools. Keep adapter policy and regional fan-out above the client layer; do not implement a replacement Redis transport or client library.
+
+Use Redis Enterprise (Redis Software) native capabilities and the selected clients' facilities. Configure and document their behavior instead of implementing replacements for conflict resolution, persistence/durability, expiration, eviction/capacity, connection pooling, or transport timeouts. Pin a deployed version/client and verify supported commands; this does not require building a new SDK or database feature.
 
 Custom baseline work is limited to the agreed adapter contract: Local lookup, Available concurrent group racing and shared-deadline cleanup, independent write fan-out, optional all-target verification, and necessary validation/idempotency handling. Keep groups in deployment configuration; validate overrides against that configuration. Use existing client pool/concurrency/timeout controls where sufficient. Do not add a group-management control plane, clock/skew-correction subsystem, or service-level enforcement layer. Preserve common absolute expiry using supported native commands; document native expiry and clock limitations instead of promising compensation. These constraints do not waive bounded request execution or result validation.
 
@@ -157,7 +161,7 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 
 ## Open implementation decisions
 
-Remaining baseline choices are deployment/integration values: language and existing compatible client, deployed builds and supported commands/data types, native persistence/expiry/capacity settings, configured groups, request deadlines, and existing client pool limits. Document native conflict and expiry behavior; measure service levels rather than building enforcement features. No replacement Redis capability is requested.
+Remaining baseline choices are deployment/integration values: official-client dependency versions (initially Jedis/redis-py) and language-specific integration, deployed builds and supported commands/data types, native persistence/expiry/capacity settings, configured groups, request deadlines, and existing client pool limits. Document native conflict and expiry behavior; measure service levels rather than building enforcement features. No replacement Redis capability is requested.
 
 The deferred monotonic modifier needs automatic floor storage/transport, safe concurrent responses, and trustworthy state-history ordering; both Linearizable implementations need validated coordination protocols. These extensions remain outside baseline implementation. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
 

@@ -1,4 +1,4 @@
-# Redis multi-region read and write behavior
+# Redis Multi-Region Adapter
 
 1. **Local:** Does my local cluster have a value?
 2. **Available (default):** Does any cluster in my group have a value?
@@ -6,7 +6,7 @@
 4. **Linearizable over Active-Active:** Does this read reflect writes completed before it began, using Active-Active plus coordination?
 5. **Linearizable over Coordinated:** Does this read reflect writes completed before it began, using independent clusters plus coordination?
 
-**Available reads by default, with monotonic off.** This project designs an adapter for Redis Software 8.x across regional databases. It separates where reads look, how writes reach other regions, and which guarantees require coordination.
+**Available reads by default, with monotonic off.** Redis Multi-Region Adapter is a proposed adapter for Redis Software 8.x across regional databases. It separates where reads look, how writes reach other regions, and which guarantees require coordination.
 
 **Status — 2026-11-09:** production design plus a legacy AWS/Terraform spike. The revised Local/Available API has no production SDK yet. Automatic monotonic enforcement and both linearizable protocols are unimplemented. The spike uses historical controls and does not implement the new Available group race. [spec.md](spec.md) is the authoritative behavior contract.
 

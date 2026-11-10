@@ -1,6 +1,6 @@
 # Deployment and write-policy decisions
 
-Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Coordinated reads are proposed for independent clusters with guarantees unselected; Linearizable requires Active-Active plus a coordination overlay and remains deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
+Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Coordinated reads are proposed for independent clusters with guarantees unselected; Causal uses native causal-enabled Active-Active per-key ordering without catch-up; the separate Linearizable option needs an additional coordination overlay and remains deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
@@ -174,7 +174,8 @@ These reads have no caller version/context input. A local null can be followed b
 | --- | --- | --- |
 | Local | One regional read; avoids WAN read fan-out. | Can miss values present elsewhere; local errors remain errors. |
 | Available (default) | Can return a value from any selected group member including local without waiting for agreement. | More requests/connections; can return stale data or deadline-null despite a value elsewhere. |
+| Causal (proposed adapter integration) | Native Active-Active causal configuration preserves same-key dependencies, reducing custom ordering code. | Reads can lag; requires deployment checks. Causal replication adds traffic/memory/performance overhead, not a global freshness barrier. |
 | Coordinated (proposed) | Targets linearizable-like access on independent, non-Active-Active clusters through application coordination. | Exact freshness/order/failure guarantees and the protocol are undefined; unsupported. |
 | Linearizable (deferred) | Would supply real-time ordering per key within its scope. | Requires Active-Active in this project plus a validated coordination overlay; Active-Active alone does not supply it. |
 
-Read policy selection never silently changes distribution, acknowledgment, or recovery. Proposed Coordinated targets independent clusters; deferred Linearizable requires Active-Active. These are project backend rules, not native guarantees. Both stronger policies remain unsupported; reject them rather than substituting Local/Available. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
+Read policy selection never silently changes distribution, acknowledgment, or recovery. Proposed Causal requires causal-enabled Active-Active; Coordinated targets independent clusters; deferred Linearizable requires Active-Active plus its additional protocol. These are project backend rules, not native guarantees. Causal adapter integration and both custom protocols need validation before use; reject unimplemented options rather than substituting Local/Available. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).

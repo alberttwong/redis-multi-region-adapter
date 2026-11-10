@@ -65,6 +65,12 @@ A first null must not stop the race. A first stale value must not wait for a new
 
 Available's new group-racing behavior is not measured by the legacy spike's `latest`/`any`/`required` runs. Keep historical reports and labels intact. Collect new client-side fan-out traces at representative load before making numeric claims for this API.
 
+## Causal, Coordinated, and Linearizable latency
+
+Causal uses native causal-enabled Active-Active replication and regional reads, without a global freshness barrier. Local write acknowledgment remains possible; preserving causal order adds replication traffic and memory/performance overhead. This native ordering requires less custom ordering code than implementing comparable coordination over independent clusters, but supplies no caught-up/latest-read guarantee. Adapter configuration checks remain proposed.
+
+Coordinated is an independent-cluster proposal with its precise guarantees/protocol unselected. Linearizable is a separate real-time freshness contract requiring Active-Active plus an additional coordination protocol under this project's backend rule. Either custom protocol can introduce WAN communication on reads, writes, or both. No measured ranking says Linearizable is faster than Coordinated, and no causal-mode results establish linearizable latency.
+
 ## Why component p99 values cannot simply be added
 
 Compute `p99(T_write)` from whole-operation samples or simulated per-request samples. In general:

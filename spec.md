@@ -20,6 +20,7 @@ The Session read option and its automatic context/lineage enforcement have been 
 | --- | --- | --- |
 | **Local** / `local` | Local cluster only | Valid local candidate or null; local infrastructure failures remain errors. |
 | **Available** / `available` (default) | Every member of the selected group, including local | First valid non-null value; null if all replies are null or the deadline expires without a value. |
+| **Causal (Active-Active)** / `causal` (proposed adapter integration) | A regional instance of an Active-Active database with causal consistency enabled | Preserve causal order on the same key through native replication; regional reads may still lag. Requires verified deployment configuration, not a freshness barrier. |
 | **Coordinated (independent clusters)** / `coordinated` (proposed) | Independent, non-Active-Active clusters in the selected geographic/global group | Target: linearizable-like access through application coordination; exact freshness/order/failure guarantees are unselected. Unsupported; reject rather than downgrade. |
 | **Linearizable** / `linearizable` (deferred) | Active-Active is required by this project's architecture, plus a geographic/global coordination protocol | Contract: real-time ordering per key. Unsupported until the additional protocol is designed and validated; Active-Active alone is insufficient. |
 
@@ -59,7 +60,7 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "available", group: "US" })` | Race all configured US members, including local, after validating group membership. |
 | `get(sessionId, { policy: "local" })` | Query only local. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, and unimplemented `coordinated`/`linearizable`). There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, and unimplemented `causal`/`coordinated`/`linearizable`). There is no public exact-version or caller-context read input.
 
 ## Data, writes, and recovery
 
@@ -71,6 +72,14 @@ Serialize a logical update as required by its business rules, allocate operation
 
 Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; request-only sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
 
+## Causal ordering on Active-Active
+
+**Causal** (`causal`) names a deployment-backed ordering behavior: read the selected regional instance of an Active-Active database with causal consistency enabled. Redis preserves causal relationships between operations on the same key across its participating instances. If the instance initiating B observed A on that key before B, other instances must observe A's effect before B's. A lagging instance may still expose neither update. This does not supply cross-key ordering, latest-completed-write discovery, or a catch-up guarantee for a caller moving regions.
+
+This is native replication behavior, not a built-in per-request Redis read-concern setting. The proposed adapter option must validate the backend/database causal flag before admitting traffic; it cannot enable ordering by attaching a request label. Causal configuration covers the participating Active-Active database, independently of the groups used by Available reads. It does not perform an Available race or a Linearizable commit barrier.
+
+Native causal ordering removes the custom replication-order enforcement that comparable ordering on independent clusters would require. Deployment validation, candidate/access checks, and adapter integration still need code. Reads remain regional and writes can use local acknowledgment; causal replication adds network traffic and memory/performance overhead. No numerical latency comparison with Coordinated or Linearizable has been established. See [Redis causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).
+
 ## Linearizability and scope
 
 The **Linearizable** option requires `distribution=active-active` as a project architecture constraint. Its contract is one history per key respecting real-time operation order for all callers in the selected geographic/global scope. Active-Active provides eventual convergence alone; ordering authority, commit rules, safe reads, fencing, partitions, and recovery require an additional validated protocol. This mode remains deferred and unsupported. The backend requirement is a project rule, not a claim that independent clusters can never implement linearizability.
@@ -81,7 +90,7 @@ The **Linearizable** option requires `distribution=active-active` as a project a
 
 A candidate design would coordinate writes/reads through an application-managed authority and verify committed state before returning it. No authority mechanism, commit/read protocol, freshness bound, concurrent-write order, fencing/failover rule, or partition/deadline behavior has been selected. These must be specified and validated before claiming a guarantee or exposing the policy. A lock, majority of copies, or all-target placement alone is not such a protocol.
 
-Proposed backend compatibility is `coordinated` with independent clusters and `linearizable` with Active-Active. Both remain unsupported in this phase; reject either request and all mismatched combinations rather than silently mapping them to Local/Available. Neither changes the Available default, reinstates Session, or changes existing write acknowledgment sets. Future protocols must define any new commit participants explicitly.
+Proposed backend compatibility is `causal` with causal-enabled Active-Active, `coordinated` with independent clusters, and `linearizable` with Active-Active plus its additional protocol. Until each adapter/protocol integration is implemented and validated, reject it and all mismatched combinations rather than mapping it to Local/Available. None changes the Available default, reinstates Session, or changes existing write acknowledgment sets. Future protocols must define any new commit participants explicitly.
 
 ## Outcomes and observability
 
@@ -109,7 +118,8 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
 | R15 | Measure end-to-end latency/outcome rates without leaking secrets | V13, V20 |
 | R16 | Record project backend constraints: Coordinated targets independent clusters; Linearizable requires Active-Active plus coordination. Both remain unsupported without validated protocols. | V21 |
+| R17 | Causal requires verified Active-Active causal configuration; promise per-key causal order without regional catch-up or cross-key freshness guarantees. | V22 |
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. The Coordinated option additionally needs a precise freshness/ordering contract and authority/commit/read/failure protocol; the Linearizable Active-Active overlay is also unvalidated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. Causal adapter integration requires validated deployment checks for the native causal flag. The Coordinated option additionally needs a precise freshness/ordering contract and authority/commit/read/failure protocol; the Linearizable Active-Active overlay is also unvalidated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).

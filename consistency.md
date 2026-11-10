@@ -1,15 +1,15 @@
 # Consistency and regional read behavior
 
-The production default is **Available** (`available`); **Local** (`local`) is explicit. Session reads have been removed. [spec.md](spec.md) owns exact behavior. The [AWS spike](spike/README.md) is a legacy experiment, not the revised production API.
+The production default is **Available** (`available`); **Local** (`local`) is explicit. Session and Causal read options have been removed; Monotonic is proposed. [spec.md](spec.md) owns exact behavior. The [AWS spike](spike/README.md) is a legacy experiment, not the revised production API.
 
 ## Separate propagation, reads, and scope
 
 | Question | Choices | Meaning |
 | --- | --- | --- |
 | How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
-| How is a value read? | Local; Available (default) | One local candidate, or the first non-null candidate from a concurrent group race including local. |
+| How is a value read? | Local; Available (default); proposed Monotonic | One local candidate, a first-value group race, or a group race constrained by automatic read history. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
-| Is stronger ordering required? | Causal or Linearizable, each over Active-Active or Coordinated | The guarantee and backend are separate. Causal permits lag; Linearizable targets real-time freshness. |
+| Is stronger ordering required? | Monotonic on either backend; Linearizable over either named backend | Monotonic prevents caller read regression; Linearizable targets real-time freshness across callers. |
 
 Neither supported read behavior provides RYOW, newest-value selection, or quorum agreement. Available can return a stale first value; timeout-null means no value arrived in time.
 
@@ -17,24 +17,21 @@ Neither supported read behavior provides RYOW, newest-value selection, or quorum
 
 Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Request-only refresh may leave idle regions stale indefinitely without another write.
 
-Active-Active supplies native per-key causal ordering when enabled, not linearizability. Independent clusters can target causal or full linearizable guarantees through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
+Active-Active supplies native per-key causal ordering when enabled, not linearizability. Both backends can target caller monotonicity through automatic read-history enforcement, or full linearizability through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
 
-## Ordering guarantee versus implementation
+## Main questions and guarantees
 
-| Option | Backend | Target ordering | Latest-write freshness? |
-| --- | --- | --- | --- |
-| Causal over Active-Active | Active-Active with native causal consistency enabled | Same-key causal dependencies, enforced by Redis. | No regional catch-up guarantee. |
-| Causal over Coordinated | Independent clusters + custom protocol | Same-key causal dependencies, enforced by the application. | No regional catch-up guarantee. |
-| Linearizable over Active-Active | Active-Active + custom protocol | One real-time order per key in scope. | Yes by contract; implementation deferred. |
-| Linearizable over Coordinated | Independent clusters + custom protocol | The same real-time order per key in scope. | Yes by contract; implementation proposed. |
+| Behavior | Main question | Guarantee |
+| --- | --- | --- |
+| Local | Does local have a value? | No read-history/freshness floor. |
+| Available | Does any group member have a value? | First valid non-null value, including local; no freshness/history floor. |
+| Monotonic (proposed) | Can I read without going backward from what I have seen? | Same or proven later state than the caller's last tracked successful read, on either backend. |
+| Linearizable over Active-Active | Does this read reflect completed writes? | Real-time order/freshness per key in scope, via a custom protocol over Active-Active. |
+| Linearizable over Coordinated | Does this read reflect completed writes? | The same guarantee, via a custom protocol over independent clusters. |
 
-Coordination is an implementation approach; causal and linearizable name guarantees. Native causal ordering needs less custom ordering code than building comparable dependency tracking/application on independent clusters. Both linearizable implementations require custom coordination, regardless of their replication backend. All adapter/custom protocol integrations remain proposed or deferred; the table is not evidence of an implemented guarantee.
+After observing 42, Monotonic rejects older 41 but may still return 42 when newest 43 is elsewhere. It needs automatic caller read-history tracking and an accepted ordering/proof relation on both backends. It searches the group for eligible state and waits/fails if an established floor cannot be honored; Available's deadline-null rule must not silently weaken it. Its tracked successful reads establish the floor, not unread writes or untracked reads. No Session/RYOW read policy is restored.
 
-### Causal order versus caught-up reads
-
-A1 applies A=`41`, then B=`42` after observing A on the same key. Either causal implementation must preserve A-before-B visibility, but Europe may still return `40` before receiving the updates. Either linearizable implementation must reflect B or later state on a read starting after B completes, or wait/fail if it cannot establish the guarantee. Causal ordering is not a real-time catch-up guarantee.
-
-Use **Causal over Active-Active** for Redis's strong eventual convergence plus enabled per-key causal ordering. [Redis documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) describes the native feature and replication overhead. **Causal over Coordinated** would implement the corresponding same-key dependency guarantee in application code over independent clusters. Neither promises cross-key causality in this design.
+Native Active-Active causal consistency remains an optional backend setting. It preserves same-key causal dependencies as data propagates, but can leave a region behind and does not ensure a caller's later regional read meets its previous observed floor. It is not a public read option or a custom causal implementation workstream. See [backend settings](backends.md#backend-causal-consistency-setting).
 
 ## Reference topology
 
@@ -43,7 +40,7 @@ The six independent clients write from these regions. Local reads use their regi
 - **US group:** A1/A2 in `us-west-2`, B1 in `us-east-1`, C1 in `us-east-2`.
 - **EU group:** D1 in `eu-west-1`, E1 in `eu-central-1`.
 
-Clients do not share application write context or a latest-version directory. Production reads carry no write-dependency context. A1/A2 share one logical regional Redis database in this example, with separate application instances. Actual cell/endpoint placement must be confirmed. Five regional databases with three primary shards each mean fifteen primary shards before replicas; six clients do not mean six databases.
+Clients do not share application write context or a latest-version directory. Local/Available reads carry no caller history; proposed Monotonic carries automatic read-history state. A1/A2 share one logical regional Redis database in this example, with separate application instances. Actual cell/endpoint placement must be confirmed. Five regional databases with three primary shards each mean fifteen primary shards before replicas; six clients do not mean six databases.
 
 ```mermaid
 flowchart LR

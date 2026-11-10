@@ -1,4 +1,4 @@
-# Specification: Local and Available reads across regions
+# Specification: regional read behaviors
 
 Date: 2026-11-09. Status: revised production design; implementation proposed.
 
@@ -12,16 +12,15 @@ The public default is **Available** (`available`): concurrently query every regi
 
 Neither behavior guarantees read-your-own-writes, monotonic reads, or the newest completed write. Different values may exist; Available returns whichever valid value arrives first without comparing versions or waiting for agreement. Null on deadline is an availability outcome, not proof of absence throughout the group.
 
-The Session read option and its automatic context/lineage enforcement have been removed from the production plan. Record identities remain internal distribution/idempotency metadata, not a public read selector or freshness requirement. The experimental spike retains legacy controls and results; it is not this production API.
+The Session and Causal read options and custom causal protocol workstream have been removed. Monotonic is a separate proposed guarantee over successful reads; it does not promise visibility of an unread acknowledged write. Record identities remain internal distribution/idempotency metadata, not a public read selector or freshness requirement. The experimental spike retains legacy controls and results; it is not this production API.
 
 ## Public read policies
 
 | Behavior / policy | Scope | Result |
 | --- | --- | --- |
-| **Local** / `local` | Local cluster only | Valid local candidate or null; local infrastructure failures remain errors. |
-| **Available** / `available` (default) | Every member of the selected group, including local | First valid non-null value; null if all replies are null or the deadline expires without a value. |
-| **Causal over Active-Active** / `causal` (proposed adapter integration) | Active-Active with native causal consistency enabled | Same-key causal dependency order; no caught-up/latest-write guarantee. |
-| **Causal over Coordinated** / `causal-coordinated` (proposed) | Independent clusters + custom protocol within the group | Same-key causal dependency order; no caught-up/latest-write guarantee. Protocol unimplemented. |
+| **Local** / `local` | Local cluster only, on either backend; Active-Active causal flag may be on or off | Valid local candidate or null; local infrastructure failures remain errors. |
+| **Available** / `available` (default) | Every member of the selected group, including local, on either backend; Active-Active causal flag may be on or off | First valid non-null value; null if all replies are null or the deadline expires without a value. |
+| **Monotonic** / `monotonic` (proposed) | Either backend; same group search as Available with automatic caller read-history enforcement | First valid value satisfying the last successful read floor; never regress. An established floor causes wait/failure if no acceptable state arrives; no latest-write guarantee. |
 | **Linearizable over Active-Active** / `linearizable` (deferred) | Active-Active + custom ordering/commit/read protocol | Real-time order per key; reflect writes completed before a read begins. Additional protocol unimplemented. |
 | **Linearizable over Coordinated** / `linearizable-coordinated` (proposed) | Independent clusters + custom ordering/commit/read protocol | The same linearizable guarantee; protocol unimplemented. |
 
@@ -61,7 +60,7 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "available", group: "US" })` | Race all configured US members, including local, after validating group membership. |
 | `get(sessionId, { policy: "local" })` | Query only local. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, ambiguous `coordinated`, and unimplemented `causal`/`causal-coordinated`/`linearizable`/`linearizable-coordinated`). There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, and unimplemented `monotonic`/`linearizable`/`linearizable-coordinated`). There is no public exact-version or caller-context read input.
 
 ## Data, writes, and recovery
 
@@ -75,19 +74,15 @@ Serialize a logical update as required by its business rules, allocate operation
 
 Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; request-only sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
 
-## Causal ordering on Active-Active
+## Proposed Monotonic reads
 
-**Causal over Active-Active** (`causal`) names a deployment-backed ordering behavior: read the selected regional instance of an Active-Active database with causal consistency enabled. Redis preserves causal relationships between operations on the same key across its participating instances. If the instance initiating B observed A on that key before B, other instances must observe A's effect before B's. A lagging instance may still expose neither update. This does not supply cross-key ordering, latest-completed-write discovery, or a catch-up guarantee for a caller moving regions.
+**Monotonic** (`monotonic`) asks: “Can I read without going backward from what I have already seen?” It targets the same guarantee on independent and Active-Active backends. Automatically retain each caller's last successful observed state per key, transport that protected floor across requests/regions, and accept only the same state or a proven later state in the accepted history. The guarantee applies to tracked Monotonic reads; do not imply that untracked earlier Local/Available reads established a floor.
 
-This is native replication behavior, not a built-in per-request Redis read-concern setting. The proposed adapter option must validate the backend/database causal flag before admitting traffic; it cannot enable ordering by attaching a request label. Causal configuration covers the participating Active-Active database, independently of the groups used by Available reads. It does not perform an Available race or a Linearizable commit barrier.
+Use the selected group, including local, with the bounded concurrent lookup mechanism of Available. With genuinely no prior observed floor, the first Monotonic read can return the first valid non-null candidate or ordinary all-null/deadline-null; it establishes a floor when an observed state is returned. Once a floor exists, an early stale/null/incomparable response cannot win. Keep searching/rechecking within the shared budget for an acceptable value. If none is found, return a typed history/freshness-unavailable error, not an older value or Available-style timeout-null. This does not wait for the newest completed write.
 
-Native causal ordering removes the custom replication-order enforcement that comparable ordering on independent clusters would require. Deployment validation, candidate/access checks, and adapter integration still need code. Reads remain regional and writes can use local acknowledgment; causal replication adds network traffic and memory/performance overhead. No numerical latency comparison with Coordinated or Linearizable has been established. See [Redis causal consistency](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/).
+A reliable version/history relation is required; arbitrary IDs, numeric labels, arrival time, or Redis last-write-wins alone do not prove that one state succeeds another. Define how concurrent versions, deletions, expiry, generations, and previously absent state participate in that history before implementation. A verified later deletion/tombstone may establish absence; a missing unexpired expected state cannot silently become null. Invalid/lost expected floors must not be treated as a first read. Middleware must serialize or otherwise safely combine a caller's concurrent read responses so the floor cannot roll back.
 
-## Causal over Coordinated
-
-**Causal over Coordinated** (`causal-coordinated`) targets the same per-key causal dependency ordering as Causal over Active-Active, implemented by the application across independent clusters. A causally dependent operation must not become visible before the operation it depends on at a participating replica. Replicas may still lag; there is no real-time latest-write or automatic cross-region read-your-own-writes guarantee.
-
-A custom protocol must capture causal dependencies, transport operations, buffer/reject out-of-order dependencies, resolve concurrency, and recover dependency state through failures. These are proposed design responsibilities, not a completed algorithm. No custom protocol, encoding, capacity/expiry rule, or failure/recovery mechanism is selected. Causal coordination may replicate asynchronously; it does not inherently require a synchronous WAN barrier on every operation. Its provisional latency ratings must be revisited after the protocol is chosen.
+Both backends need this automatic read-history integration; Active-Active supplies replication but its optional causal flag does not track the last state seen by a caller moving regions. Independent clusters additionally need an accepted state-ordering/evidence mechanism. No mechanism, token/state lifecycle, failure contract, or production SDK is implemented. Business code selects the behavior without manually passing versions. Writes do not by themselves advance the read floor; the removed Session/RYOW policy is not reinstated. See the [monotonic-read definition](https://www.mongodb.com/docs/manual/core/read-isolation-consistency-recency/#causal-consistency).
 
 ## Linearizable implementations and scope
 
@@ -97,9 +92,9 @@ Both protocols must cover write authority/serialization, safe commit/read rules,
 
 ## Backend validation and implementation status
 
-Local/Available remain the current production plan with Available as default. Causal over Active-Active uses a native feature but still needs adapter/deployment validation. Causal over Coordinated and both Linearizable implementations need custom protocols before exposure. Reject unimplemented policies and backend mismatches rather than silently mapping them to Local/Available. The former ambiguous `coordinated` policy is replaced by `causal-coordinated` and `linearizable-coordinated`.
+Local/Available remain the current baseline with Available as default. Proposed Monotonic can use either backend only after its automatic caller-history/state-ordering protocol is validated. Active-Active native causal consistency is optional backend configuration, not a read-policy selector or substitute for Monotonic enforcement.
 
-The “over Active-Active” options use `distribution=active-active`; the “over Coordinated” options use `distribution=independent`. Active-Active causal consistency must be enabled for `causal`. Neither name enables a guarantee automatically, reinstates the removed Session API, or changes the existing write acknowledgment set. Each custom protocol must separately define its participants and commit conditions.
+`linearizable` uses Active-Active plus its custom protocol; `linearizable-coordinated` uses independent clusters plus its custom protocol. Reject unimplemented options, removed `causal`/`causal-coordinated`/Session/exact-version selectors, and mismatched configurations rather than downgrading. Each custom protocol must define its participants/conditions. None changes the existing write acknowledgment set automatically.
 
 ## Outcomes and observability
 
@@ -127,9 +122,9 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
 | R15 | Measure end-to-end latency/outcome rates without leaking secrets | V13, V20 |
 | R16 | Validate guarantee/backend mapping and reject all unimplemented or mismatched stronger options; replace ambiguous Coordinated with its two explicit guarantees. | V21 |
-| R17 | Causal over Active-Active requires verified native causal configuration and no regional catch-up/cross-key freshness claim. | V22 |
-| R18 | Custom causal coordination targets same-key dependency order; both linearizable implementations target the same real-time per-key freshness guarantee, including failure behavior. | V23, V24 |
+| R17 | Proposed Monotonic automatically preserves per-caller successful-read history across regions on either backend; reject regression, lost floors, and unprovable state. | V22, V23 |
+| R18 | Both linearizable implementations target the same real-time per-key freshness guarantee, including bounded wait/failure rather than stale/timeout-null results. | V24 |
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. Causal adapter integration requires validated deployment checks for the native causal flag. Causal over Coordinated needs its dependency propagation/application/recovery protocol; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. Monotonic needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).

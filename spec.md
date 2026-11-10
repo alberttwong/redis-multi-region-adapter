@@ -64,7 +64,7 @@ Configuration separates `distribution` (`active-active` or `independent`), `ackn
 
 ## Data, writes, and recovery
 
-The [write behavior table](README.md#write-behavior) separates local acceptance, independent all-target placement, and future custom causal/linearizable commit rules. Distribution, acknowledgment, and recovery remain distinct. Local acceptance must also establish replay capture when enabled. Future custom commit conditions are unselected; an Available read deadline returning null never implies an analogous successful write or rollback.
+The [write behavior table](README.md#write-behavior) separates local acceptance, independent all-target placement, and future linearizable commit rules. Distribution, acknowledgment, and recovery remain distinct. Local acceptance must also establish replay capture when enabled. Future custom commit conditions are unselected; an Available read deadline returning null never implies an analogous successful write or rollback.
 
 Use Redis Software 8.x with three primary data shards per regional database and additional replica shards. Pin exact builds, commands, client, persistence, expiry, capacity, and conflict behavior. Suggested immutable envelope key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`; a local candidate hint may use `session:{opaque-session-id}:available`. The hint key name is storage plumbing, not the read fan-out policy.
 
@@ -88,7 +88,7 @@ Both backends need this automatic read-history integration; Active-Active suppli
 
 **Linearizable over Active-Active** (`linearizable`) uses Active-Active plus an application ordering/commit/read protocol. **Linearizable over Coordinated** (`linearizable-coordinated`) uses independent clusters plus such a protocol. The backend is the implementation distinction; both target **one real-time order per key** for every participating read and write in a captured geographic/global scope. A read beginning after a completed write must reflect that write or a later one, including committed deletion/absence. If freshness cannot be established, wait within a bound or fail explicitly; never substitute a stale value or Available-style deadline-null.
 
-Both protocols must cover write authority/serialization, safe commit/read rules, durability assumptions, fencing, failover, concurrent operations, partitions, deadlines, and recovery. No protocol is selected or validated. Native Active-Active causal ordering, CRDT convergence, a lock alone, or all-target copy placement is insufficient to establish linearizability. The independent implementation can target the same full guarantee; it is not inherently “weak.” Latency depends on the protocol and topology; no speed advantage for either backend is established.
+Both protocols must cover write authority/serialization, safe commit/read rules, durability assumptions, fencing, failover, concurrent operations, partitions, deadlines, and recovery. No protocol is selected or validated. Native Active-Active causal ordering, CRDT convergence, a lock alone, or all-target copy placement is insufficient to establish linearizability. The independent implementation can target the same full guarantee; it is not inherently “weak.” Both implementations carry **slow++** planning ratings for reads and writes. Actual latency depends on the protocol and topology; the band is not a measured SLO or universal lower bound, and no speed advantage for either backend is established.
 
 ## Backend validation and implementation status
 

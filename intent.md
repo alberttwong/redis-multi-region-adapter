@@ -10,7 +10,7 @@ Available chooses a value by arrival time, not freshness. Either option may retu
 
 Session and Causal read options have been removed. Proposed **Monotonic** (`monotonic`) asks whether a caller can read without going backward from its last tracked successful observation. It automatically retains/transports read history and rejects older or unproven state on either backend. It may miss newer writes and does not promise RYOW. The integration is unimplemented and requires state-history proofs, safe floor updates, and bounded wait/failure handling.
 
-**Linearizable over Active-Active** and **Linearizable over Coordinated** target the same real-time ordering/freshness per key through different replication backends and custom coordination. No such protocol is implemented. Native Active-Active causal consistency remains optional backend configuration, not a read behavior or a substitute for Monotonic/Linearizable enforcement.
+**Linearizable over Active-Active** and **Linearizable over Coordinated** target the same real-time ordering/freshness per key through different replication backends and custom coordination. No such protocol is implemented. Both implementations have **slow++** read/write planning ratings; these are qualitative estimates, not measured guarantees. Native Active-Active causal consistency remains optional backend configuration, not a read behavior or a substitute for Monotonic/Linearizable enforcement.
 
 ## Topology and scope
 

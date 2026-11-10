@@ -23,8 +23,7 @@ Active-Active supplies native per-key causal ordering when enabled, not lineariz
 
 | Option | Backend | Target ordering | Latest-write freshness? |
 | --- | --- | --- | --- |
-| Causal over Active-Active | Active-Active with native causal consistency enabled | Same-key causal dependencies, enforced by Redis. | No regional catch-up guarantee. |
-| Causal over Coordinated | Independent clusters + custom protocol | Same-key causal dependencies, enforced by the application. | No regional catch-up guarantee. |
+| Causal | Independent with custom causal coordination, or Active-Active with causal consistency enabled | Same-key causal dependency order; implementation selected by backend. | No regional catch-up guarantee. |
 | Linearizable over Active-Active | Active-Active + custom protocol | One real-time order per key in scope. | Yes by contract; implementation deferred. |
 | Linearizable over Coordinated | Independent clusters + custom protocol | The same real-time order per key in scope. | Yes by contract; implementation proposed. |
 
@@ -34,7 +33,7 @@ Coordination is an implementation approach; causal and linearizable name guarant
 
 A1 applies A=`41`, then B=`42` after observing A on the same key. Either causal implementation must preserve A-before-B visibility, but Europe may still return `40` before receiving the updates. Either linearizable implementation must reflect B or later state on a read starting after B completes, or wait/fail if it cannot establish the guarantee. Causal ordering is not a real-time catch-up guarantee.
 
-Use **Causal over Active-Active** for Redis's strong eventual convergence plus enabled per-key causal ordering. [Redis documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) describes the native feature and replication overhead. **Causal over Coordinated** would implement the corresponding same-key dependency guarantee in application code over independent clusters. Neither promises cross-key causality in this design.
+Use the single **Causal** label for same-key causal ordering. On Active-Active, causal consistency must be enabled; on independent clusters, a custom causal protocol is required. [Redis documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) describes the native feature and replication overhead. The independent implementation provides the corresponding same-key dependency guarantee through application code. Neither implementation promises cross-key causality in this design.
 
 ## Reference topology
 

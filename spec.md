@@ -18,10 +18,9 @@ The Session read option and its automatic context/lineage enforcement have been 
 
 | Behavior / policy | Scope | Result |
 | --- | --- | --- |
-| **Local** / `local` | Local cluster only | Valid local candidate or null; local infrastructure failures remain errors. |
-| **Available** / `available` (default) | Every member of the selected group, including local | First valid non-null value; null if all replies are null or the deadline expires without a value. |
-| **Causal over Active-Active** / `causal` (proposed adapter integration) | Active-Active with native causal consistency enabled | Same-key causal dependency order; no caught-up/latest-write guarantee. |
-| **Causal over Coordinated** / `causal-coordinated` (proposed) | Independent clusters + custom protocol within the group | Same-key causal dependency order; no caught-up/latest-write guarantee. Protocol unimplemented. |
+| **Local** / `local` | Local cluster only, on either backend; Active-Active causal flag may be on or off | Valid local candidate or null; local infrastructure failures remain errors. |
+| **Available** / `available` (default) | Every member of the selected group, including local, on either backend; Active-Active causal flag may be on or off | First valid non-null value; null if all replies are null or the deadline expires without a value. |
+| **Causal** / `causal` (proposed) | Independent clusters with a custom causal protocol, or Active-Active with native causal consistency enabled | Same-key causal dependency order; no caught-up/latest-write guarantee. Select and validate the implementation from `distribution`. Active-Active with the flag disabled does not qualify. |
 | **Linearizable over Active-Active** / `linearizable` (deferred) | Active-Active + custom ordering/commit/read protocol | Real-time order per key; reflect writes completed before a read begins. Additional protocol unimplemented. |
 | **Linearizable over Coordinated** / `linearizable-coordinated` (proposed) | Independent clusters + custom ordering/commit/read protocol | The same linearizable guarantee; protocol unimplemented. |
 
@@ -61,7 +60,7 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "available", group: "US" })` | Race all configured US members, including local, after validating group membership. |
 | `get(sessionId, { policy: "local" })` | Query only local. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, ambiguous `coordinated`, and unimplemented `causal`/`causal-coordinated`/`linearizable`/`linearizable-coordinated`). There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, ambiguous `coordinated`, and unimplemented `causal`/`linearizable`/`linearizable-coordinated`). There is no public exact-version or caller-context read input.
 
 ## Data, writes, and recovery
 
@@ -77,7 +76,7 @@ Active-Active owns CRDT transport and strong eventual convergence. Independent m
 
 ## Causal ordering on Active-Active
 
-**Causal over Active-Active** (`causal`) names a deployment-backed ordering behavior: read the selected regional instance of an Active-Active database with causal consistency enabled. Redis preserves causal relationships between operations on the same key across its participating instances. If the instance initiating B observed A on that key before B, other instances must observe A's effect before B's. A lagging instance may still expose neither update. This does not supply cross-key ordering, latest-completed-write discovery, or a catch-up guarantee for a caller moving regions.
+**Causal** (`causal`) on `distribution=active-active` uses the native implementation: read the selected regional instance of an Active-Active database with causal consistency enabled. Redis preserves causal relationships between operations on the same key across its participating instances. If the instance initiating B observed A on that key before B, other instances must observe A's effect before B's. A lagging instance may still expose neither update. This does not supply cross-key ordering, latest-completed-write discovery, or a catch-up guarantee for a caller moving regions.
 
 This is native replication behavior, not a built-in per-request Redis read-concern setting. The proposed adapter option must validate the backend/database causal flag before admitting traffic; it cannot enable ordering by attaching a request label. Causal configuration covers the participating Active-Active database, independently of the groups used by Available reads. It does not perform an Available race or a Linearizable commit barrier.
 
@@ -85,7 +84,7 @@ Native causal ordering removes the custom replication-order enforcement that com
 
 ## Causal over Coordinated
 
-**Causal over Coordinated** (`causal-coordinated`) targets the same per-key causal dependency ordering as Causal over Active-Active, implemented by the application across independent clusters. A causally dependent operation must not become visible before the operation it depends on at a participating replica. Replicas may still lag; there is no real-time latest-write or automatic cross-region read-your-own-writes guarantee.
+**Causal** (`causal`) on `distribution=independent` targets the same per-key causal dependency ordering as its native Active-Active implementation, implemented by the application across independent clusters. A causally dependent operation must not become visible before the operation it depends on at a participating replica. Replicas may still lag; there is no real-time latest-write or automatic cross-region read-your-own-writes guarantee.
 
 A custom protocol must capture causal dependencies, transport operations, buffer/reject out-of-order dependencies, resolve concurrency, and recover dependency state through failures. These are proposed design responsibilities, not a completed algorithm. No custom protocol, encoding, capacity/expiry rule, or failure/recovery mechanism is selected. Causal coordination may replicate asynchronously; it does not inherently require a synchronous WAN barrier on every operation. Its provisional latency ratings must be revisited after the protocol is chosen.
 
@@ -97,9 +96,9 @@ Both protocols must cover write authority/serialization, safe commit/read rules,
 
 ## Backend validation and implementation status
 
-Local/Available remain the current production plan with Available as default. Causal over Active-Active uses a native feature but still needs adapter/deployment validation. Causal over Coordinated and both Linearizable implementations need custom protocols before exposure. Reject unimplemented policies and backend mismatches rather than silently mapping them to Local/Available. The former ambiguous `coordinated` policy is replaced by `causal-coordinated` and `linearizable-coordinated`.
+Local/Available remain the current production plan with Available as default. They work with either backend and do not require Active-Active causal consistency to be enabled. Causal is a single proposed read behavior with backend-selected implementation: native causal-enabled Active-Active, or a custom causal protocol on independent clusters. Both implementations need validation before use; the independent protocol is unimplemented. An Active-Active database with the causal flag disabled cannot satisfy `causal` merely by changing a request label.
 
-The “over Active-Active” options use `distribution=active-active`; the “over Coordinated” options use `distribution=independent`. Active-Active causal consistency must be enabled for `causal`. Neither name enables a guarantee automatically, reinstates the removed Session API, or changes the existing write acknowledgment set. Each custom protocol must separately define its participants and commit conditions.
+The public Causal policy is `causal` on either backend; `causal-coordinated` is not a separate public policy. `linearizable` uses Active-Active plus its custom protocol and `linearizable-coordinated` uses independent clusters plus its custom protocol. Reject unimplemented options, the ambiguous `coordinated` label, obsolete aliases, and mismatched configurations instead of downgrading to Local/Available. The label does not automatically enable a guarantee or reinstate Session. Each custom protocol must define its own participants and commit conditions.
 
 ## Outcomes and observability
 

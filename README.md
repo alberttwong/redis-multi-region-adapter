@@ -1,5 +1,22 @@
 # Redis Multi-Region Adapter
 
+## Why build this?
+
+An application running in several regions needs a clear answer to a simple question: **what should happen when the session it needs is missing or stale in the local Redis database?**
+
+For example, a user creates a session in the US and their next request reaches Europe before that session arrives there. A local lookup can return null even though another region has the session. If Europe has an older copy, the application must decide whether that value is acceptable. Replication, read routing, and the guarantees promised to the caller are separate decisions.
+
+This proposed adapter gives applications one explicit contract for those decisions across Redis Active-Active databases or independent regional Redis clusters. It uses native Redis capabilities and existing clients, with adapter logic for regional reads and, where needed, write distribution.
+
+## What does it solve?
+
+- **Sessions that exist outside the local region:** the proposed default, **Available**, queries every database in a configured geographic or global group concurrently and returns the first valid non-null value within a shared deadline. An early local miss does not end the search.
+- **Choosing regional read scope:** **Local** keeps a lookup in one region; **Available** searches the configured group, including local. Applications can make that tradeoff explicitly.
+- **Knowing what a successful write means:** the design separates delivery from acknowledgment. Active-Active supplies Redis-managed replication; independent clusters need adapter fan-out. Local acceptance and proposed all-target verification have different success conditions.
+- **Understanding consistency and failure behavior:** the contract states when reads may be stale, when they return null or an error, and who handles missed delivery. This gives application teams a shared behavior to implement and validate.
+
+**Scope today:** this repository contains a design and a legacy AWS spike, with no production SDK for the revised API. Local and Available can return stale data and do not guarantee read-your-own-writes. Automatic monotonic reads and linearizable protocols are future, unimplemented extensions. The detailed choices and limits follow below.
+
 **Read questions**
 
 1. **Read scope:** Should the read look only locally, across a geographic group, or across all regions?

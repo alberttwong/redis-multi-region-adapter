@@ -4,6 +4,14 @@ Date: 2026-11-09. Status: revised production design; implementation proposed.
 
 Inputs: [intent.md](intent.md), [sources.md](sources.md). Proof: [validation.md](validation.md).
 
+## Implementation boundary
+
+Use Redis Enterprise (Redis Software) native capabilities and existing compatible client facilities. Configure and document their behavior instead of implementing replacements for conflict resolution, persistence/durability, expiration, eviction/capacity, connection pooling, or transport timeouts. Pin a deployed version/client and verify supported commands; this does not require building a new SDK or database feature.
+
+Custom baseline work is limited to the agreed adapter contract: Local lookup, Available concurrent group racing and shared-deadline cleanup, independent write fan-out, optional all-target verification, and necessary validation/idempotency handling. Keep groups in deployment configuration; validate overrides against that configuration. Use existing client pool/concurrency/timeout controls where sufficient. Do not add a group-management control plane, clock/skew-correction subsystem, or service-level enforcement layer. Preserve common absolute expiry using supported native commands; document native expiry and clock limitations instead of promising compensation. These constraints do not waive bounded request execution or result validation.
+
+Monotonic and Linearizable remain explicitly unimplemented extensions requiring additional code/protocols; native facilities alone must not be described as supplying those guarantees. Do not add them to the baseline implementation.
+
 ## Selected contract
 
 The public default is **Available** (`available`): concurrently query every regional cluster in the selected read group, including the local cluster, and return the first valid non-null candidate. A null reply never wins over an outstanding request that may return a value. If every cluster returns null, return null immediately. If the shared deadline expires before a valid value is obtained, return null even when some clusters have not replied.
@@ -83,7 +91,7 @@ The [write behavior table](README.md#write-behavior) separates local acceptance,
 
 Use Redis Software 8.x with three primary data shards per regional database and additional replica shards. Pin exact builds, commands, client, persistence, expiry, capacity, and conflict behavior. Suggested immutable envelope key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`; a local candidate hint may use `session:{opaque-session-id}:available`. The hint key name is storage plumbing, not the read fan-out policy.
 
-The envelope binds session identity, schema, generation, record ID, payload, digest, and server-controlled absolute expiry. Record identity is for copying/retry verification; numeric labels such as 42/43 are not a global revision clock. Candidate publication follows successful snapshot storage and may lag or regress under the accepted backend conflict semantics; reads make no latest-state claim. Validate the exact candidate-selection/conflict rule before implementation. Read candidates by key, not scans.
+The envelope binds session identity, schema, generation, record ID, payload, digest, and server-controlled absolute expiry. Record identity is for copying/retry verification; numeric labels such as 42/43 are not a global revision clock. Candidate publication follows successful snapshot storage and may lag or regress under the accepted backend conflict semantics; reads make no latest-state claim. Use the selected Redis data type's native conflict semantics and supported commands for candidate storage; document their limits without adding a custom merge or conflict-resolution engine. Read candidates by key, not scans.
 
 Serialize a logical update as required by its business rules, allocate operation/record IDs once, and reuse them on retries. Copy the same envelope to destinations without repeating business mutations or resetting expiry. On ambiguous write acknowledgment, reconcile the same IDs at the origin; do not claim rollback or exactly-once execution. Conflicting identity/content is an integrity error.
 
@@ -149,6 +157,8 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, persistence/retention, expiry/skew, and service levels remain unselected. The monotonic modifier needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Remaining baseline choices are deployment/integration values: language and existing compatible client, deployed builds and supported commands/data types, native persistence/expiry/capacity settings, configured groups, request deadlines, and existing client pool limits. Document native conflict and expiry behavior; measure service levels rather than building enforcement features. No replacement Redis capability is requested.
+
+The deferred monotonic modifier needs automatic floor storage/transport, safe concurrent responses, and trustworthy state-history ordering; both Linearizable implementations need validated coordination protocols. These extensions remain outside baseline implementation. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
 
 Local and Available inherit same-key causal operation ordering when Active-Active causal consistency is enabled. This backend ordering does not ensure a region has caught up or prevent a caller from reading older state after switching regions. With monotonic on, both strategies additionally enforce per-caller same-key non-regression using automatic read history; independent clusters need that enforcement too. Neither causal ordering nor monotonic reads guarantees the latest completed write. Same-key Redis ordering must not be assumed to order multiple snapshot/hint keys.

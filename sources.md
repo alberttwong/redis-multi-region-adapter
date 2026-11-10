@@ -40,14 +40,18 @@ All user decisions below were made on 2026-11-09. They select scope, not every p
 - Each independent same-session insert/update distributes its current version as normal write fan-out. This is not a separate next-write refresh mode. Historical gaps need not be restored, and without another write a missed delivery may stay unrepaired indefinitely. Describe an absent expected exact snapshot as **snapshot missing**.
 - Prefer diagrams for configuration and failure flows. Every outcome must identify its configuration; preset labels distinguish supported choices from settings actually selected by the user. Keep the README consistency summary short and walkthroughs in the detailed guide.
 
+## Implementation scope constraint
+
+Use Redis Enterprise native features and existing client facilities for conflict semantics, persistence/durability, expiry, capacity/eviction, pooling, and timeouts. Most remaining baseline decisions are configuration or capability verification, not new functionality. Limit custom baseline code to the selected read/write adapter behavior and its necessary validation, deadlines, cleanup, and identity handling. Do not add replacement database features or dynamic group, clock-correction, resource-management, or service-level enforcement subsystems. Monotonic and Linearizable remain deferred custom extensions, not implied native capabilities.
+
 ## Open decisions before implementation
 
 Assign the responsible owners; no names or approvals are inferred.
 
-1. **Platform:** pin product/database/client builds, supported commands per mode, replica layout, persistence/eviction, shard capacity, target discovery, and authoritative configuration-epoch storage.
-2. **Read API and group execution:** choose language/framework, candidate/conflict rules, allowed group overrides including local, endpoint discovery, concurrent dispatch, deadline/null telemetry, and winner/loser cleanup. Caller write-context and lineage enforcement are not production requirements.
+1. **Platform configuration:** record the deployed Redis/database build, existing compatible client, supported commands/data types, replica layout, native persistence/eviction and shard capacity, and deployment-configured targets/epochs. Use the platform and client facilities as provided.
+2. **Read adapter integration:** choose language/existing client and native candidate-storage commands; document native conflict behavior. Configure allowed groups/overrides including local, implement the selected concurrent read race/shared deadline/cleanup, and reuse existing client pools and limits. No custom conflict engine or dynamic group-management feature. Caller write-context and lineage enforcement are not baseline requirements.
 3. **Distribution:** select acknowledgment rules, bounded request-time fan-out scheduling/retries, idempotency/conflict handling, and target readiness. No application background repair or historical-backfill feature is selected.
-4. **Service and security:** agree payload/envelope limits, latency/throughput targets, deadlines, expiry/skew, record retention, RPO/RTO, revocation/authorization responsibilities, and incident ownership.
+4. **Deployment and measurement:** configure native expiration, persistence, retention and capacity plus client request/pool limits. Document clock/expiry and durability limitations, measure latency/throughput and failure outcomes, and record operational responsibilities. Do not build clock correction or a service-level enforcement subsystem; authorization/revocation policy remains the application's responsibility.
 5. **Stronger read contracts:** define monotonic-modifier floor storage/transport and on/off/Local/Available transitions, concurrency/rollback protection, trustworthy state-history comparison, deletion/absence/expiry/generation handling, and bounded failure semantics on both backends; define/prove each linearizable commit/read/failure protocol. Native causal configuration needs no separate application Causal read option.
 6. **Delivery:** choose CI/provisioning, artifact reviewers, production release authority, and rollout/rollback checks.
 

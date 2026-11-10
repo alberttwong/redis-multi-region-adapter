@@ -132,7 +132,9 @@ Backend delivery recovery does not create linearizability. Both future lineariza
 
 ## What remains open
 
-The baseline design selects Available/Local, bounded fan-out, and local acknowledgment; it does not implement them as a production adapter. Decisions still needed include the SDK/client, exact Redis builds and supported commands, candidate/conflict rules, persistence and durability, expiry/skew, resource limits, allowed group overrides, and service levels.
+The baseline design selects Available/Local, bounded fan-out, and local acknowledgment; it does not implement them as a production adapter. **Use Redis Enterprise capabilities and existing client facilities as provided.** Select a compatible existing client and record the deployed Redis version and supported commands. Use native data-type/conflict semantics, configured persistence and durability, expiration, eviction/capacity controls, and client connection pools/timeouts. These are deployment and integration choices, not requests to build replacement features.
+
+Keep adapter code limited to the selected behavior: local lookup, concurrent Available group reads with a shared deadline and cleanup, independent write fan-out, and optional all-target verification, with the necessary validation and retry identity handling. Use deployment-configured groups and existing client limits; do not add dynamic group management, a custom conflict-resolution engine, persistence layer, clock/skew-correction system, resource-management framework, or service-level enforcement subsystem. Record native limitations and measure outcomes rather than promising stronger guarantees.
 
 Automatic monotonic history and both linearizable protocols need implementation and fault validation. Immediate cross-device revocation, cross-session transactions, historical backfill, and application background repair are outside the selected baseline. A read result alone does not establish current authorization. See [plan.md](plan.md), [validation.md](validation.md), and [sources.md](sources.md).
 

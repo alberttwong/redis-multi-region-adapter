@@ -28,6 +28,8 @@ No production support matrix, approved linearizable protocol, or production serv
 
 ## Selected decisions
 
+Architecture preference clarified on 2026-11-09: **Active-Active is preferred** for its broader native capabilities beyond replication. Independent-cluster adapter fan-out provides a reduced subset, not feature parity; the adapter adds an explicit Local/Available read contract on either backend. Cost comparisons must include application engineering and operations alongside infrastructure, without assuming the reduced alternative is cheaper.
+
 All user decisions below were made on 2026-11-09. They select scope, not every proposed implementation mechanism.
 
 - Redis Software 8.x, with Active-Active and an additional non-Active-Active option. The independent regional fan-out architecture is the proposed implementation of that additional option.

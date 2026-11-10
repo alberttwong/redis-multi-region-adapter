@@ -20,6 +20,8 @@ Available selects the local region's configured read group, or a validated expli
 
 ## Distribution choices
 
+**Active-Active is the preferred deployment model** because it supplies local regional reads/writes, native CRDT conflict resolution, replication catch-up, and optional same-key causal ordering. Independent-cluster adapter fan-out is a reduced subset of those capabilities, with no equivalent native inter-region conflict resolution, causal ordering, or automatic catch-up. Its availability as an alternative does not imply capability parity or lower total cost. The adapter's Local/Available read contract can be layered over either backend.
+
 Support Redis Software 8.x Active-Active or independent regional clusters with adapter fan-out. Active-Active owns replication recovery; independent mode uses bounded request-time fan-out with no background repair. Each later same-session write distributes its current value; without another write, missed delivery may stay unrepaired indefinitely. No separate recovery selector or durable replay option is planned. Local acknowledgment is baseline; independent `all-targets` verifies the captured full target set.
 
 A1 writing 42 does not make either read behavior wait for 42. Local reads the regional candidate; Available can obtain a value from any group member, including local, and an older first value can win. All-target write placement does not create linearizability. See [consistency.md](consistency.md), [backends.md](backends.md), and [spec.md](spec.md).

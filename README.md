@@ -10,7 +10,7 @@ Consider a session created in the US just before the user's next request reaches
 
 Deployment cost is another consideration. In the five-region example, the adapter can use Redis Active-Active across all five regions or one independent Redis cluster per region. Compared with five separate deployments each containing one primary and four passive replicas, either topology may be more infrastructure-efficient. Actual savings depend on equivalent capacity, throughput, and HA requirements. One primary with four replicas total across five regions is a different alternative: it already has five copies, but concentrates writes in one region and retains [replication lag](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) for regional reads.
 
-Compare total cost, including regional compute and memory, local HA, persistence/backups, licensing or service fees, network traffic, and operations. Active-Active has [additional sizing overhead](https://redis.io/docs/latest/operate/rs/databases/active-active/planning/) supporting its broader capabilities; adapter fan-out adds requests, traffic, and application maintenance. Fewer logical copies alone do not establish lower total cost. Choose the backend based on the capabilities, operational responsibilities, and costs your application needs.
+Actual savings depend on equivalent capacity and HA requirements, network traffic, and operational costs. Active-Active includes additional native capabilities; independent clusters shift more responsibility to the application.
 
 ## What does it solve?
 

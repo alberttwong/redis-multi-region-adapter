@@ -1,6 +1,6 @@
 # Sources and decisions
 
-Updated: 2026-11-09. Authored documents omit customer identities and workload branding. This file records provenance and decision status; [spec.md](spec.md) owns behavior.
+Updated: 2026-11-10. Authored documents omit customer identities and workload branding. This file records provenance and decision status; [spec.md](spec.md) owns behavior.
 
 ## Precedence and artifact ownership
 
@@ -46,12 +46,16 @@ All user decisions below were made on 2026-11-09. They select scope, not every p
 
 Use Redis Enterprise native features and existing client facilities for conflict semantics, persistence/durability, expiry, capacity/eviction, pooling, and timeouts. Most remaining baseline decisions are configuration or capability verification, not new functionality. Limit custom baseline code to the selected read/write adapter behavior and its necessary validation, deadlines, cleanup, and identity handling. Do not add replacement database features or dynamic group, clock-correction, resource-management, or service-level enforcement subsystems. Monotonic and Linearizable remain deferred custom extensions, not implied native capabilities.
 
+## Client foundation decision — 2026-11-10
+
+Direct user instruction requires the adapter to **build on top of, or work with, the [official Redis clients](https://redis.io/docs/latest/develop/clients/)**. This broadens the preceding Jedis/redis-py selection: **Jedis for Java** and **redis-py for Python** remain initial integration targets, with other official clients allowed through the same adapter contract. The Redis client index was checked on 2026-11-10 and lists both clients as supported. Exact dependency versions, language-specific API/packaging, resource ownership, and integration validation remain open. Support for additional clients must be validated before being claimed. The legacy Python spike does not establish production API compliance.
+
 ## Open decisions before implementation
 
 Assign the responsible owners; no names or approvals are inferred.
 
-1. **Platform configuration:** record the deployed Redis/database build, existing compatible client, supported commands/data types, replica layout, native persistence/eviction and shard capacity, and deployment-configured targets/epochs. Use the platform and client facilities as provided.
-2. **Read adapter integration:** choose language/existing client and native candidate-storage commands; document native conflict behavior. Configure allowed groups/overrides including local, implement the selected concurrent read race/shared deadline/cleanup, and reuse existing client pools and limits. No custom conflict engine or dynamic group-management feature. Caller write-context and lineage enforcement are not baseline requirements.
+1. **Platform configuration:** record the deployed Redis/database build, selected official-client versions (initially Jedis/redis-py), supported commands/data types, replica layout, native persistence/eviction and shard capacity, and deployment-configured targets/epochs. Use the platform and client facilities as provided.
+2. **Read adapter integration:** define official-client integration through public APIs, initially Java/Jedis and Python/redis-py, including supplied-client/pool ownership and native candidate-storage commands; document native conflict behavior. Configure allowed groups/overrides including local, implement the selected concurrent read race/shared deadline/cleanup, and reuse existing client pools and limits. No custom conflict engine or dynamic group-management feature. Caller write-context and lineage enforcement are not baseline requirements.
 3. **Distribution:** select acknowledgment rules, bounded request-time fan-out scheduling/retries, idempotency/conflict handling, and target readiness. No application background repair or historical-backfill feature is selected.
 4. **Deployment and measurement:** configure native expiration, persistence, retention and capacity plus client request/pool limits. Document clock/expiry and durability limitations, measure latency/throughput and failure outcomes, and record operational responsibilities. Do not build clock correction or a service-level enforcement subsystem; authorization/revocation policy remains the application's responsibility.
 5. **Stronger read contracts:** define monotonic-modifier floor storage/transport and on/off/Local/Available transitions, concurrency/rollback protection, trustworthy state-history comparison, deletion/absence/expiry/generation handling, and bounded failure semantics on both backends; define/prove each linearizable commit/read/failure protocol. Native causal configuration needs no separate application Causal read option.

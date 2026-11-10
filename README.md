@@ -8,8 +8,6 @@
 
 Consider a session created in the US just before the user's next request reaches Europe. Before that update reaches Europe, a local read may return null or an older session on either backend. The adapter lets the application read only locally or search a configured group for a valid value within a deadline. Available can find a session in another region, while still allowing an older response to win.
 
-Across five regions, the adapter supports Redis Active-Active or independent Redis clusters. Either approach may require less infrastructure than five separate deployments, each with one primary and four replicas. Actual savings depend on comparable capacity, throughput, high-availability requirements, network traffic, and operational costs. Active-Active includes additional native capabilities; independent clusters shift more responsibility to the application.
-
 ## What does it solve?
 
 The proposed adapter gives applications one explicit session-access contract across either backend:

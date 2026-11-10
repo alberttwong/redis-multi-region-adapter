@@ -2,7 +2,7 @@
 
 ## Why build this?
 
-**Redis Active-Active is the preferred model for multi-region Redis.** It provides regional reads and writes, CRDT conflict resolution, automatic replication and catch-up, and optional same-key causal ordering. It supplies a broader set of capabilities than application write fan-out. Use [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) and an existing client when its native behavior meets the application's needs.
+**This adapter builds on Redis Active-Active and does not replace it.** [Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/) provides regional reads and writes, CRDT conflict resolution, automatic replication and catch-up, and optional same-key causal ordering. The adapter adds an application-level session-access contract while relying on those native capabilities. Use Active-Active and an existing client directly when its native behavior meets the application's needs.
 
 This project defines a narrower session-access contract: **where should an application look for a session, how long should it wait, and what does a successful write mean?** That contract can sit on top of Active-Active. For deployments using independent regional clusters, the proposed adapter also distributes session updates itself, reproducing a reduced subset of Active-Active's capabilities. That alternative has no equivalent inter-region CRDT conflict resolution, native causal ordering, or automatic catch-up after missed delivery.
 

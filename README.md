@@ -18,6 +18,16 @@ The remaining application decision is **where to look and what result to accept 
 
 If local reads with eventual convergence meet the application's needs, Active-Active with an existing client may be sufficient. The adapter is useful when the application needs the explicit group-read contract. Available can find a session outside the local region, but an older value can still win; monotonic enforcement and linearizable coordination remain unimplemented extensions.
 
+### Would one active region and four passive replicas be enough?
+
+It can be, if the application accepts one write region and potentially stale regional reads. A single writer avoids concurrent multi-region writes, but [asynchronous replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) still allows a passive read replica to miss a newly created session or return older state. Switching between replicas can move a caller's reads backward. All writes must reach the active region, adding cross-region latency for remote clients; a loss of connectivity requires recovery or failover before those clients can write again. Reading from the active region also avoids replica lag during normal operation, with cross-region read latency and dependence on that region.
+
+### What about infrastructure cost?
+
+**Five regional copies still require capacity in five regions, even when four are passive.** Budget for memory and compute for each copy, local HA replicas where configured, persistence/backups, replication traffic, and operations. Active-Active additionally has [documented memory and replication overhead](https://redis.io/docs/latest/operate/rs/databases/active-active/planning/); compare actual deployment sizing and licensing or service quotes rather than assuming either topology is cheaper.
+
+The adapter also has costs: Available dispatches reads to every group member, increasing request volume and potentially cross-region traffic. Independent write fan-out sends each update to every write target and requires application engineering and operations. It does not remove regional database capacity or guarantee infrastructure savings. Compare total cost at the required latency, availability, and consistency: using fewer regions may reduce capacity costs, but choosing a smaller read group alone does not reduce write targets or stored copies.
+
 ## What does it solve?
 
 - **Sessions that exist outside the local region:** the proposed default, **Available**, queries every database in a configured geographic or global group concurrently and returns the first valid non-null value within a shared deadline. An early local miss does not end the search.

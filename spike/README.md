@@ -4,6 +4,8 @@ This is an **experimental measurement harness**, not the production session SDK 
 
 The revised production API has `local` (one regional lookup) and default `available` (concurrently race all selected group members, including local; first non-null value, or null on all-null/deadline). Session reads have been removed from production scope. This legacy spike retains `latest`, `any`, and `required` controls and explicitly managed actor context; **it does not implement the new group-racing Available policy**. Historical run reports and runtime controls retain their original meanings. New production reads need separate implementation and measurement.
 
+Production recovery is now named/defaulted as `next-write-refresh` for independent clusters and `redis-managed` for Active-Active, with independent `durable-replay` opt-in. This legacy harness and historical reports retain their original `request-only` recovery control/preset meanings; their runtime defaults and recorded measurements have not been renamed by the design-document update.
+
 ## Topology
 
 Terraform creates five isolated VPCs, a full mesh of ten inter-region peering links, private DNS, fifteen Redis nodes (three per regional cluster across AZs), and five regional runners. Each regional database uses three primary data shards plus replicas. The independent and Active-Active datasets coexist on ports 12000 and 12001 so they can use the same hardware; run one workload at a time and record residual background traffic.

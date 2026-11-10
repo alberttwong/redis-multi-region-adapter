@@ -18,7 +18,7 @@ Propagation, read behavior, and cluster-group scope are separate choices.
 
 | Convergence | Meaning | Infrastructure |
 | --- | --- | --- |
-| **Eventual** | Copies may differ during delivery and converge when delivery completes. | Active-Active owns replication; independent clusters need adapter fan-out/recovery. Request-only delivery can leave gaps indefinitely without a later write. |
+| **Eventual** | Copies may differ during delivery and converge when delivery completes. | Active-Active owns replication; independent clusters need adapter fan-out/recovery. Next-write refresh delivery can leave gaps indefinitely without a later write. |
 
 ### Read behavior — Monotonic off (default)
 
@@ -79,17 +79,17 @@ This table describes acknowledgment/commit behavior. Distribution and recovery a
 
 Latency labels are planning estimates; capture overhead, additional WAN phases, or deadlines can change the band. A timed-out all-target or custom commit is not success or rollback: preserve IDs and report the protocol's partial/uncertain/error outcome. Do not apply Available reads' timeout-null behavior to writes. The custom commit row is a future protocol responsibility, not an implemented `acknowledgment` value. The monotonic modifier is a read-only guarantee and does not add a write acknowledgment mode or advance its floor from writes alone.
 
-**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Independent recovery:** request-only next-write refresh, or optional durable replay. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
+**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Recovery defaults:** `next-write-refresh` for independent clusters; `redis-managed` for Active-Active. Durable replay is opt-in for independent clusters. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
 
 ## Recovery
 
-Recovery is separate from write acknowledgment. In the current independent-cluster design, request-only or durable replay can accompany either local or all-target acknowledgment; no independent recovery default has been selected.
+Here, recovery means repairing incomplete inter-region delivery, not restarting or restoring a Redis server. A background repair worker is optional. Recovery is separate from write acknowledgment. In the current design, independent clusters default to **next-write refresh** (`next-write-refresh`), with durable replay opt-in; Active-Active defaults to **Redis-managed** (`redis-managed`). Either independent recovery choice can accompany local or all-target acknowledgment.
 
 | Recovery | Backend | After incomplete delivery | Requires another write? |
 | --- | --- | --- | --- |
-| **Request-only** / `request-only` | Independent clusters | Bounded request-time delivery attempts; no unfinished work is persisted. The next write to the same session distributes its latest version, without necessarily restoring older missed versions. An idle region can remain stale indefinitely. | **Yes**, for another delivery attempt after the request ends. |
-| **Durable replay** / `durable-replay` | Independent clusters | An outbox/worker retries retained delivery obligations after request-process exit, subject to original expiry and retention. Accepted writes must capture the obligation recoverably before success. | **No.** A running worker resumes retained work. |
-| **Redis-managed** | Active-Active | Redis handles replication, synchronization backlog, and catch-up under its configured persistence/recovery behavior. No application outbox/replay worker is selected for this backend. | **No**, for Redis-managed replication recovery. |
+| **Next-write refresh (independent default)** / `next-write-refresh` | Independent clusters | Bounded request-time delivery attempts; no unfinished work is persisted. The next write to the same session distributes its latest version, without necessarily restoring older missed versions. An idle region can remain stale indefinitely. | **Yes**, for another delivery attempt after the request ends. |
+| **Durable replay (opt-in)** / `durable-replay` | Independent clusters | An outbox/worker retries retained delivery obligations after request-process exit, subject to original expiry and retention. Accepted writes must capture the obligation recoverably before success. | **No.** A running worker resumes retained work. |
+| **Redis-managed (Active-Active default)** / `redis-managed` | Active-Active | Redis handles replication, synchronization backlog, and catch-up under its configured persistence/recovery behavior. No application outbox/replay worker is selected for this backend. | **No**, for Redis-managed replication recovery. |
 
 Recovery does not retroactively acknowledge an uncertain write, guarantee permanent availability, or create linearizability. Future Linearizable protocols must separately define commit recovery, authority/fencing, and failover; selecting a row here is not sufficient. See [backends.md](backends.md).
 
@@ -101,7 +101,7 @@ Deployment has three separate choices:
 
 - **Distribution:** Redis Active-Active, or independent regional databases with adapter fan-out.
 - **Acknowledgment:** local by default; independent mode can explicitly wait for all configured targets.
-- **Recovery in independent mode:** request-only next-write refresh, or optional durable replay.
+- **Recovery:** `next-write-refresh` by default for independent clusters, `redis-managed` for Active-Active; independent `durable-replay` is opt-in.
 
 Without durable replay, the next insert/update for the same session sends its latest version to all configured regions. It need not fill historical gaps. An absent exact snapshot is described as **snapshot missing**.
 
@@ -124,6 +124,6 @@ The current production baseline covers `available` (default) and `local`. Propos
 
 ## Status
 
-Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. No independent recovery combination has been selected. Group-racing Available is a revised production design; the legacy spike does not implement it.
+Design plus an experimental AWS/Terraform latency spike, updated 2026-11-09. The spike has prototype read/write/replay paths and protocol tests; it is not a production adapter or strict consistency implementation. No production enforcement hooks exist yet. The consistency target is agreed; detailed algorithms, exact builds, capacity, durability, retention, and service levels remain to be reviewed. Recovery defaults are selected by backend; deployment-specific persistence and worker details remain proposed. Group-racing Available is a revised production design; the legacy spike does not implement it.
 
 The artifact structure follows the [AI-native SDLC playbook](https://claude.com/resources/articles/the-ai-native-sdlc-playbook). Repository Markdown is the design source of truth; external sources supply provenance and product capability evidence.

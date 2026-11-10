@@ -6,6 +6,8 @@ A1/A2 read/write `us-west-2`, B1 reads/writes `us-east-1`, C1 reads/writes `us-e
 
 ## Choose distribution
 
+Recovery omission is resolved by backend: independent clusters use `next-write-refresh`; Active-Active uses `redis-managed` and native synchronization recovery. The latter is an adapter descriptor, not an application worker or a native Redis setting. Explicit backend-incompatible recovery values are invalid; durable replay is opt-in only for independent clusters.
+
 Local and Available reads support either backend. Local reads one cluster; default Available concurrently reads every selected group member, including local, and takes the first non-null value. Read fan-out is separate from write propagation. Active-Active supplies eventual convergence, not linearizability. The monotonic modifier is proposed on Local/Available on either backend and requires automatic caller read-history tracking plus proof of acceptable state ordering. Linearizable over Active-Active and Linearizable over Coordinated target the same real-time per-key guarantee through custom protocols. Causal is no longer a read option or custom protocol workstream; Redis's native causal flag remains optional backend configuration. See [infrastructure by consistency level](consistency.md#infrastructure-by-consistency-level).
 
 ```mermaid
@@ -14,7 +16,7 @@ flowchart LR
     Redis --> Independent["Independent databases"]
     AA --> Native["Write once; Redis distributes snapshots"]
     Independent --> Fanout["Adapter fans out the same immutable snapshot"]
-    Fanout --> Recovery["Choose request-only or durable replay"]
+    Fanout --> Recovery["Default next-write-refresh; opt into durable replay"]
 ```
 
 Active-Active owns CRDT transport and convergence. Do not fan out the same non-idempotent business mutation to its participants. Independent mode disables Active-Active and must supply distribution itself; ordinary [primary/replica replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/) does not synchronize independent writable databases. Local HA replicas are not regional delivery targets.
@@ -41,11 +43,13 @@ Local acknowledgment is the baseline. Optional `all-targets` waits for every mem
 
 Target scope is explicit: US-only verification is not verification of every global region. Current local acknowledgment does not wait for group peers or foreign groups. In the five-target sample, all-targets verifies all five; groups do not implicitly reduce this set. A future origin-group-only barrier with foreign asynchronous delivery requires a distinct acknowledgment-set design. Active-Active in this phase uses origin acknowledgment; an adapter verification overlay for that backend is not currently specified.
 
-## Request-only: refresh on the next write
+## Next-write refresh: independent default
+
+Recovery here means inter-region delivery repair, not local Redis server recovery. Independent clusters do not synchronize with one another automatically. Next-write refresh does not add a background worker; durable replay is only needed when retained delivery should resume without another same-session write.
 
 The [Recovery table](README.md#recovery) compares both independent-cluster options with Redis-managed Active-Active recovery. Recovery is configured separately from acknowledgment; future linearizable protocols need their own validated commit-recovery rules.
 
-`request-only` attempts delivery during bounded request execution and records observable outcomes without persisting unfinished work. Local success may precede remote completion. Process exit can abandon in-memory attempts.
+`next-write-refresh` is the default when `distribution=independent` and recovery is omitted. It attempts delivery during bounded request execution and records observable outcomes without persisting unfinished work. Local success may precede remote completion. Process exit can abandon in-memory attempts.
 
 The next insert/update **for the same session** sends only its latest version to all configured targets. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.
 
@@ -53,7 +57,7 @@ Local and Available do not require an exact historical identity or caller contex
 
 ## Durable replay: retain delivery obligations
 
-`durable-replay` is optional. A per-origin outbox and worker preserve unfinished copies so delivery can continue after request-process exit and without another insert/update. The worker may run with the adapter deployment; it need not add a session-service hop to reads.
+`durable-replay` is an explicit opt-in for independent clusters; it never becomes the default because acknowledgment or group settings change. A per-origin outbox and worker preserve unfinished copies so delivery can continue after request-process exit and without another insert/update. The worker may run with the adapter deployment; it need not add a session-service hop to reads.
 
 Before successful acknowledgment, origin acceptance must bind the snapshot and replay obligation atomically, or use an equivalent reviewed recovery protocol. Redis-local atomic capture must colocate the relevant keys in one slot and use commands supported by the pinned deployment. Three primary shards require slot-scoped capture/discovery, not an assumed cross-shard transaction. A concrete mechanism and persistence contract remain unselected.
 
@@ -65,7 +69,7 @@ Replay can finish a timed-out all-target write, but the original outcome remains
 
 At a destination, apply the immutable snapshot before publishing its discovery hint. Use a deterministic, backend-supported candidate/conflict rule and reject conflicting identity/content. A publication timestamp or larger numeric label does not establish global freshness. Local and Available validate candidates without caller write-context checks.
 
-With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Request-only does not promise historical backfill: admit targets for future latest-version writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
+With replay, new-target catch-up requires a baseline plus a captured replay position without gaps; removal and log trimming must reconcile outstanding target obligations. Next-write refresh does not promise historical backfill: admit targets for future latest-version writes and treat absent historical records as missing. A separate baseline/backfill feature would require an explicit scope decision.
 
 Restored targets do not become fresh merely because their endpoint is healthy. Revalidate identity, expiry, and candidate publication. Preserve configuration epochs and distinguish internal expected-copy verification from public Local/Available null results. Endpoint health does not establish current authorization.
 

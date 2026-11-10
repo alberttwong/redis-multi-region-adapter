@@ -15,7 +15,7 @@ Neither supported read behavior provides RYOW, newest-value selection, or quorum
 
 ## Infrastructure by consistency level
 
-Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Request-only refresh may leave idle regions stale indefinitely without another write.
+Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Next-write refresh may leave idle regions stale indefinitely without another write.
 
 Active-Active supplies native per-key causal ordering when enabled, not linearizability. Both backends can target caller monotonicity through automatic read-history enforcement, or full linearizability through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
 
@@ -97,4 +97,6 @@ An Available read group includes local and may be geographic or explicitly globa
 
 ## Distribution and history
 
-Request-only mode distributes only the next same-session update's latest version; it need not restore missing historical 42 when 43 is delivered. Local/Available read current candidates without requiring either exact identity. Internal placement verification can still describe a known absent copy as **snapshot missing**. Durable replay optionally retains original copy obligations; neither replay nor all-target placement creates linearizability or proves current authorization.
+Independent clusters default to `next-write-refresh`; Active-Active defaults to `redis-managed`. Durable replay is an explicit independent-cluster opt-in. Read groups, monotonic settings, and acknowledgment choices do not change these recovery defaults.
+
+Next-write refresh mode distributes only the next same-session update's latest version; it need not restore missing historical 42 when 43 is delivered. Local/Available read current candidates without requiring either exact identity. Internal placement verification can still describe a known absent copy as **snapshot missing**. Durable replay optionally retains original copy obligations; neither replay nor all-target placement creates linearizability or proves current authorization.

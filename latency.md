@@ -16,6 +16,8 @@ Produce per-origin/per-destination results at specified offered load and payload
 
 ## Request-path model
 
+Recovery defaults are independent `next-write-refresh` and Active-Active `redis-managed`. C/E below require explicit independent durable replay; a default read/acknowledgment does not activate capture or a worker. The labels describe production design paths, while historical spike results keep their recorded control names.
+
 The following variables are **per-request durations or random variables**, not p99 values to add:
 
 - `H`: adapter/middleware/client overhead, including pool waiting and group dispatch not counted below.
@@ -28,11 +30,11 @@ The following variables are **per-request durations or random variables**, not p
 A simple planning timeline accepts origin/capture first and then dispatches remote copies in parallel. Under that explicit scheduling assumption:
 
 ```text
-A: active-active + local                  T_write = H + O_A
-B: independent + local + request-only     T_write = H + O_B
-C: independent + local + durable-replay   T_write = H + C
-D: independent + all-targets + request    T_write = H + O_B + max_i(J_i + D_i)
-E: independent + all-targets + replay     T_write = H + C   + max_i(J_i + D_i)
+A: active-active + local + redis-managed            T_write = H + O_A
+B: independent + local + next-write-refresh         T_write = H + O_B
+C: independent + local + durable-replay             T_write = H + C
+D: independent + all-targets + next-write-refresh   T_write = H + O_B + max_i(J_i + D_i)
+E: independent + all-targets + durable-replay       T_write = H + C   + max_i(J_i + D_i)
 ```
 
 For D/E, i ranges over required remote targets; origin acceptance is already included. Different builds/modes/load can change O, so A and B are not assumed equal. For C/E, an external capture store could add phases; an atomic local outbox could share one path. E may dispatch directly or through its worker; measure the chosen path, including backlog when applicable.

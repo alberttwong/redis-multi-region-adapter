@@ -4,11 +4,11 @@ Status: proposed production Local/Available API with a legacy AWS spike. Availab
 
 ## Selected versus configurable
 
-**Selected:** `available` by default; explicit `local`. Available concurrently queries all group clusters including local and returns the first valid non-null value, or null on all-null completion/deadline without a value. Local reads only its regional candidate. Neither enforces RYOW, latest state, or shared ordering.
+**Selected:** `available` by default; explicit `local`. Recovery defaults by backend: independent `next-write-refresh`, Active-Active `redis-managed`; independent durable replay remains opt-in. Available concurrently queries all group clusters including local and returns the first valid non-null value, or null on all-null completion/deadline without a value. Local reads only its regional candidate. Neither enforces RYOW, latest state, or shared ordering.
 
-**Still configurable:** distribution, independent acknowledgment, and independent recovery. A–E below are configuration presets for explaining outcomes, not a claim that one deployment preset has been chosen. `local` is the baseline acknowledgment; `all-targets` is opt-in. Independent recovery must be chosen explicitly.
+**Still configurable:** distribution, independent acknowledgment, and independent recovery. A–E below are configuration presets for explaining outcomes, not a claim that one deployment preset has been chosen. `local` is the baseline acknowledgment; `all-targets` is opt-in. Omitted recovery resolves to `next-write-refresh` for independent clusters or `redis-managed` for Active-Active. Independent `durable-replay` is an explicit opt-in; acknowledgment remains a separate setting.
 
-Field names are proposed configuration concepts, not a shipping SDK schema. Active-Active's application `recovery` is not applicable: Redis owns transport, so `recovery=not-applicable` below is descriptive rather than an extra SDK setting.
+Field names are proposed configuration concepts, not a shipping SDK schema. Active-Active uses effective `recovery=redis-managed`: Redis owns transport/catch-up, without an application outbox/worker. This is an adapter configuration description, not a native Redis configuration parameter. Independent mode defaults to `next-write-refresh`, while `durable-replay` adds explicit application capture/worker requirements.
 
 ## Choose a configuration and see its outcome
 
@@ -16,13 +16,13 @@ Each leaf contains the complete configuration and the resulting behavior. Preset
 
 ```mermaid
 flowchart TD
-    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=available<br/><br/>Origin success; Redis distributes; Available races the read group including local; value or null"]
+    Start{"distribution?"} -->|active-active| A["Preset A<br/>distribution=active-active<br/>acknowledgment=local<br/>recovery=redis-managed<br/>readPolicy=available<br/><br/>Origin success; Redis distributes; Available races the read group including local; value or null"]
     Start -->|independent| Ack{"acknowledgment?"}
     Ack -->|local| LocalRecovery{"recovery?"}
-    LocalRecovery -->|request-only| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Origin success; next same-session write distributes only its latest version"]
+    LocalRecovery -->|next-write-refresh: default| B["Preset B<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=next-write-refresh<br/>readPolicy=available<br/><br/>Origin success; next same-session write distributes only its latest version"]
     LocalRecovery -->|durable-replay| C["Preset C<br/>distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Origin success after recoverable capture; worker finishes missing copies"]
     Ack -->|all-targets| AllRecovery{"recovery?"}
-    AllRecovery -->|request-only| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
+    AllRecovery -->|next-write-refresh: default| D["Preset D<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=next-write-refresh<br/>readPolicy=available<br/><br/>Success only after every target verifies; later writes refresh missed regional state"]
     AllRecovery -->|durable-replay| E["Preset E<br/>distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Success only after every target verifies; worker retains unfinished delivery"]
 ```
 
@@ -48,7 +48,7 @@ flowchart TD
     Choices --> All["All-target acknowledgment"]
     All --> APro["Benefit: every captured target verifies the snapshot before success"]
     All --> ACost["Cost: slowest target controls latency; one missing target prevents success"]
-    Choices --> Request["Request-only recovery"]
+    Choices --> Request["Next-write refresh recovery (independent default)"]
     Request --> RPro["Benefit: no durable outbox or replay worker; next write refreshes state"]
     Request --> RCost["Cost: idle sessions can stay stale; missed exact snapshots may remain missing"]
     Choices --> Durable["Durable replay recovery"]
@@ -56,7 +56,7 @@ flowchart TD
     Durable --> DCost["Cost: atomic capture, worker, backlog capacity, retention, and monitoring"]
 ```
 
-Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
+Local + next-write-refresh has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + next-write-refresh verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
 
 The [write behavior table](README.md#write-behavior) compares local/all-target acknowledgment and future custom commit protocols; distribution and recovery stay separate.
 
@@ -67,10 +67,10 @@ The setup is identical at every leaf: client A1 in `us-west-2` has written 42, t
 ```mermaid
 flowchart TD
     Write["A1 writes 42 in us-west-2; target us-east-1 unavailable"] --> Preset{"Which configuration preset?"}
-    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=not-applicable<br/>readPolicy=available<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
-    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=request-only<br/>readPolicy=available<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
+    Preset -->|A| A["A: distribution=active-active<br/>acknowledgment=local<br/>recovery=redis-managed<br/>readPolicy=available<br/><br/>Write may succeed locally; Redis handles delayed delivery"]
+    Preset -->|B| B["B: distribution=independent<br/>acknowledgment=local<br/>recovery=next-write-refresh<br/>readPolicy=available<br/><br/>Write may succeed locally; next same-session insert/update distributes its latest version"]
     Preset -->|C| C["C: distribution=independent<br/>acknowledgment=local<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>Write may succeed after recoverable capture; worker retries B"]
-    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=request-only<br/>readPolicy=available<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
+    Preset -->|D| D["D: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=next-write-refresh<br/>readPolicy=available<br/><br/>No write success at deadline; partial/uncertain outcome; next write refreshes state"]
     Preset -->|E| E["E: distribution=independent<br/>acknowledgment=all-targets<br/>recovery=durable-replay<br/>readPolicy=available<br/><br/>No write success at deadline; partial/uncertain outcome; worker can finish saved copies"]
 ```
 
@@ -126,7 +126,7 @@ const groups = {
 const configuration = {
   distribution: "independent",
   acknowledgment: "local",
-  recovery: "request-only",
+  recovery: "next-write-refresh", // Independent default; may be omitted.
   readPolicy: "available",
   monotonic: false, // Optional guarantee; true needs the proposed history integration.
   targets,
@@ -144,7 +144,7 @@ const sessionsD1 = createSessionStore({ ...configuration, localRegion: "eu-west-
 const sessionsE1 = createSessionStore({ ...configuration, localRegion: "eu-central-1", readGroup: "EU" });
 ```
 
-This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1/D1/E1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and no application recovery setting.
+This selects **configuration preset B**, not client B1. Presets A–E describe deployment choices; client names A1/A2/B1/C1/D1/E1 identify independent callers. To select preset C, use `recovery: "durable-replay"`; preset D changes acknowledgment to `"all-targets"`; preset E changes both. Replay also needs validated capture/worker setup. Preset A uses provisioned Active-Active, local acknowledgment, and default `recovery: "redis-managed"` (or omitted recovery); no application replay worker is selected.
 
 The five regional databases have fifteen primary shards before replicas. A1/A2 share the west regional database, so six clients do not add six regional targets. Baseline local acknowledgment does not wait for either the whole origin group or the foreign group. In this sample, changing acknowledgment to all-targets would verify the five configured targets; a separate origin-group acknowledgment set would need an explicit design choice rather than being inferred from groups.
 

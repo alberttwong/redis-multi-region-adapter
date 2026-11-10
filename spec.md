@@ -67,7 +67,16 @@ These are behavioral proposals, not a shipping SDK schema.
 | `get(sessionId, { policy: "local", monotonic: true })` (proposed) | Query/recheck only local state while enforcing the caller's last tracked read floor. |
 | `get(sessionId, { policy: "available", monotonic: true })` (proposed) | Race group members including local and accept only candidates satisfying the caller's last tracked read floor. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), proposed boolean `monotonic` (`false` default), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, obsolete standalone `monotonic`, and unimplemented `linearizable`/`linearizable-coordinated`). Reject `monotonic: true` until the modifier integration is implemented; never silently ignore it. Non-boolean modifier values are invalid. There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), `recovery` (`next-write-refresh` default for independent clusters, `redis-managed` default for Active-Active, explicit independent `durable-replay`), `readPolicy` (`available` default or `local`), proposed boolean `monotonic` (`false` default), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, obsolete standalone `monotonic`, and unimplemented `linearizable`/`linearizable-coordinated`). Reject `monotonic: true` until the modifier integration is implemented; never silently ignore it. Non-boolean modifier values are invalid. There is no public exact-version or caller-context read input.
+
+## Recovery default resolution
+
+- `distribution=independent` with recovery omitted resolves to `next-write-refresh`; explicitly selecting that value has the same behavior. No unfinished delivery work is persisted for background replay. The next same-session write sends its current version again; idle regions may remain stale indefinitely.
+- `distribution=independent` with explicit `recovery=durable-replay` requires validated recoverable capture and a worker. It is opt-in, under either local or all-target acknowledgment, and capture must succeed before write acceptance can be reported.
+- `distribution=active-active` with recovery omitted resolves to `redis-managed`; explicitly selecting that value has the same behavior. Redis owns replication/synchronization recovery; no application replay worker/capture is selected by this descriptor. Persistence/durability settings remain separate.
+- Reject unknown recovery names and backend mismatches, including independent `redis-managed` or Active-Active `next-write-refresh`/`durable-replay`. The obsolete proposed `request-only` and `not-applicable` names are not production modes. Never silently downgrade an explicit durable-replay request to the default.
+
+These are effective adapter defaults, not Redis server configuration parameters. They do not select the deployment backend or change read strategy, monotonic setting, groups, write acknowledgment participants, or future linearizable recovery requirements. The legacy spike retains its historical control names and measurements.
 
 ## Data, writes, and recovery
 
@@ -79,7 +88,7 @@ The envelope binds session identity, schema, generation, record ID, payload, dig
 
 Serialize a logical update as required by its business rules, allocate operation/record IDs once, and reuse them on retries. Copy the same envelope to destinations without repeating business mutations or resetting expiry. On ambiguous write acknowledgment, reconcile the same IDs at the origin; do not claim rollback or exactly-once execution. Conflicting identity/content is an integrity error.
 
-Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; request-only sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
+Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; next-write-refresh sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
 
 ## Proposed monotonic modifier
 
@@ -130,7 +139,7 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R08 | Apply authorization, identity, integrity, generation, and expiry checks | V02, V14 |
 | R09 | Keep Local errors distinct; preserve Available outcome/error telemetry | V09, V14 |
 | R10 | Separate read-group membership from write acknowledgment targets | V10, V15 |
-| R11 | Preserve independent request-only and optional durable-replay contracts | V16, V17 |
+| R11 | Resolve independent next-write-refresh and Active-Active redis-managed defaults; keep independent durable replay explicit and reject mismatched recovery modes | V16, V17, V21 |
 | R12 | Preserve local/all-target acknowledgment and uncertain outcomes | V12, V15 |
 | R13 | Validate restore/admission, expiry, retention, and configuration epochs | V18 |
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |

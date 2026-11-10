@@ -18,13 +18,15 @@ Local/Available with `monotonic: false` require no caller-history floor. Propose
 
 ## Writes and recovery
 
-Independent request-only distributes the next same-session update's latest version and need not restore missing history. Idle regions can remain stale indefinitely. Optional durable replay must capture obligations before success, retain original expiry, retry idempotently, and apply backpressure before obligations are lost. Monitor backlog, oldest work, per-target progress, and expiry.
+Resolve omitted recovery from the backend: independent `next-write-refresh`, Active-Active `redis-managed`. Independent durable replay is explicit opt-in with validated capture/worker configuration; reject unknown/mismatched values and never silently fall back from replay to the default. Record the effective mode alongside acknowledgment.
+
+Independent next-write-refresh distributes the next same-session update's latest version and need not restore missing history. Idle regions can remain stale indefinitely. Optional durable replay must capture obligations before success, retain original expiry, retry idempotently, and apply backpressure before obligations are lost. Monitor backlog, oldest work, per-target progress, and expiry.
 
 Local acknowledgment accepts the origin; explicit independent all-target success requires every captured target. Timeout is partial/uncertain, not rollback. Preserve original IDs and targets for reconciliation; a later write does not retroactively acknowledge an earlier one. Read groups and write participant sets remain separate.
 
 ## Restore, rollout, and evidence
 
-Restored/admitted targets need backend-specific readiness, integrity/expiry checks, and any selected replay catch-up protocol. Healthy connectivity does not prove freshness. Request-only admission has no historical-backfill promise. Preserve epochs and outstanding write obligations during changes.
+Restored/admitted targets need backend-specific readiness, integrity/expiry checks, and any selected replay catch-up protocol. Healthy connectivity does not prove freshness. Next-write refresh admission has no historical-backfill promise. Preserve epochs and outstanding write obligations during changes.
 
 Measure Local and Available at realistic group size/load, including null/error rates, all-attempt histograms, per-target latency, pool saturation, fan-out counts, cancellations, and late work. Rehearse first-null/later-value, all-null, deadline-null, stale-first, partial endpoint failure, membership changes, and winner cleanup. Rollout/rollback must preserve the documented policy behavior; no production release automation is installed by these documents.
 

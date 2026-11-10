@@ -43,6 +43,8 @@ Target scope is explicit: US-only verification is not verification of every glob
 
 ## Request-only: refresh on the next write
 
+The [Recovery table](README.md#recovery) compares both independent-cluster options with Redis-managed Active-Active recovery. Recovery is configured separately from acknowledgment; future linearizable protocols need their own validated commit-recovery rules.
+
 `request-only` attempts delivery during bounded request execution and records observable outcomes without persisting unfinished work. Local success may precede remote completion. Process exit can abandon in-memory attempts.
 
 The next insert/update **for the same session** sends only its latest version to all configured targets. A successful delivery of 43 can refresh B's local state without filling missing historical 42. This is the normal flow; no manual repair step is required. No later write means no further distribution attempt, so an idle session can remain stale.

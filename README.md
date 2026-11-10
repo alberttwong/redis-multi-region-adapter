@@ -81,6 +81,18 @@ Latency labels are planning estimates; capture overhead, additional WAN phases, 
 
 **Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Independent recovery:** request-only next-write refresh, or optional durable replay. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
 
+## Recovery
+
+Recovery is separate from write acknowledgment. In the current independent-cluster design, request-only or durable replay can accompany either local or all-target acknowledgment; no independent recovery default has been selected.
+
+| Recovery | Backend | After incomplete delivery | Requires another write? |
+| --- | --- | --- | --- |
+| **Request-only** / `request-only` | Independent clusters | Bounded request-time delivery attempts; no unfinished work is persisted. The next write to the same session distributes its latest version, without necessarily restoring older missed versions. An idle region can remain stale indefinitely. | **Yes**, for another delivery attempt after the request ends. |
+| **Durable replay** / `durable-replay` | Independent clusters | An outbox/worker retries retained delivery obligations after request-process exit, subject to original expiry and retention. Accepted writes must capture the obligation recoverably before success. | **No.** A running worker resumes retained work. |
+| **Redis-managed** | Active-Active | Redis handles replication, synchronization backlog, and catch-up under its configured persistence/recovery behavior. No application outbox/replay worker is selected for this backend. | **No**, for Redis-managed replication recovery. |
+
+Recovery does not retroactively acknowledge an uncertain write, guarantee permanent availability, or create linearizability. Future Linearizable protocols must separately define commit recovery, authority/fencing, and failover; selecting a row here is not sufficient. See [backends.md](backends.md).
+
 ## Start here
 
 Read [intent.md](intent.md) for the goal, [consistency.md](consistency.md) for the guarantees and examples, and [decisions.md](decisions.md) for configuration diagrams and option tradeoffs. [spec.md](spec.md) is the authoritative behavior contract.

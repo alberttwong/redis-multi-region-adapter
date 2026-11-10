@@ -42,6 +42,21 @@ Available uses the local region's configured read group unless a valid group ove
 
 The Session read option has been removed. Local/Available reads require no caller write context or successor proofs. There is no public exact-version selector. The [experimental spike](spike/README.md) retains historical controls and results; it does not implement this revised production API.
 
+## Write behavior
+
+This table describes acknowledgment/commit behavior. Distribution and recovery are separate choices; Available is a read policy, not a write acknowledgment mode.
+
+| Write behavior | Backend | Success acknowledged when | Ordering / visibility guarantee | Write latency | Status |
+| --- | --- | --- | --- | --- | --- |
+| **Local acknowledgment** / `local` | Independent or Active-Active | The origin accepts the update under the selected durability policy; independent durable replay also captures its obligation before success. | Remote regions may lag. The acknowledgment alone adds no global ordering; native causal order applies only when Active-Active causal consistency is enabled. | **fast** | Baseline. Replay capture adds work when enabled. |
+| **All-target acknowledgment** / `all-targets` | Independent clusters | Every target in the captured write set verifies the same identified update. | Placement at acknowledgment; not atomic visibility, disk durability, or linearizability. | **slow+** | Proposed independent option; one missing target prevents success. |
+| **Custom causal coordination** | Independent clusters | A future Causal over Coordinated protocol's dependency/acceptance conditions are satisfied. Exact acknowledgment rule remains unselected. | Target: same-key causal dependencies, not latest-write freshness. | **slow+** | Proposed and unimplemented; may allow asynchronous replication, so rating is provisional. |
+| **Linearizable commit protocol** | Active-Active + custom coordination, or independent clusters + custom coordination | A future protocol establishes a safely ordered commit according to its authority/failure model. Exact commit rule remains unselected. | Target: the same real-time per-key guarantee for both linearizable implementations. Matching reads must use that protocol too. | **slow+** | Proposed/deferred; neither replication nor all-target placement alone provides it. |
+
+Latency labels are planning estimates; capture overhead, additional WAN phases, or deadlines can change the band. A timed-out all-target or custom commit is not success or rollback: preserve IDs and report the protocol's partial/uncertain/error outcome. Do not apply Available reads' timeout-null behavior to writes. The two custom rows are future protocol responsibilities, not new implemented `acknowledgment` values.
+
+**Distribution:** write once with Active-Active and let Redis replicate, or copy the same immutable update to the configured independent clusters. **Independent recovery:** request-only next-write refresh, or optional durable replay. These choices do not change merely because a read group or read policy is selected. See [backends.md](backends.md).
+
 ## Start here
 
 Read [intent.md](intent.md) for the goal, [consistency.md](consistency.md) for the guarantees and examples, and [decisions.md](decisions.md) for configuration diagrams and option tradeoffs. [spec.md](spec.md) is the authoritative behavior contract.

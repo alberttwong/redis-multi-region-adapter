@@ -58,6 +58,8 @@ flowchart TD
 
 Local + request-only has the least custom recovery machinery among independent options, accepting missed historical delivery. Local + durable replay adds background recovery while keeping remote targets off the success path. All-targets + request-only verifies placement on success but leaves partial writes for subsequent same-session refresh. All-targets + durable replay adds recovery of retained original copies, with both acknowledgment and worker complexity. None of these combinations supplies linearizable geographic consistency or current revocation checks.
 
+The [write behavior table](README.md#write-behavior) compares local/all-target acknowledgment and future custom commit protocols; distribution and recovery stay separate.
+
 ## Version 42 when Region B is unavailable
 
 The setup is identical at every leaf: client A1 in `us-west-2` has written 42, target `us-east-1` used by B1 is unavailable, and the configured write deadline is finite. B is in the captured target set for all-targets presets. Partial copies are not rolled back.

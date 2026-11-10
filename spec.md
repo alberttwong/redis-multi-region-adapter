@@ -65,6 +65,8 @@ Configuration separates `distribution` (`active-active` or `independent`), `ackn
 
 ## Data, writes, and recovery
 
+The [write behavior table](README.md#write-behavior) separates local acceptance, independent all-target placement, and future custom causal/linearizable commit rules. Distribution, acknowledgment, and recovery remain distinct. Local acceptance must also establish replay capture when enabled. Future custom commit conditions are unselected; an Available read deadline returning null never implies an analogous successful write or rollback.
+
 Use Redis Software 8.x with three primary data shards per regional database and additional replica shards. Pin exact builds, commands, client, persistence, expiry, capacity, and conflict behavior. Suggested immutable envelope key: `session:{opaque-session-id}:snapshot:<generation>:<record-id>`; a local candidate hint may use `session:{opaque-session-id}:available`. The hint key name is storage plumbing, not the read fan-out policy.
 
 The envelope binds session identity, schema, generation, record ID, payload, digest, and server-controlled absolute expiry. Record identity is for copying/retry verification; numeric labels such as 42/43 are not a global revision clock. Candidate publication follows successful snapshot storage and may lag or regress under the accepted backend conflict semantics; reads make no latest-state claim. Validate the exact candidate-selection/conflict rule before implementation. Read candidates by key, not scans.

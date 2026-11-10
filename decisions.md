@@ -1,6 +1,6 @@
 # Deployment and write-policy decisions
 
-Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. The proposed stronger options are Monotonic on either backend and the two Linearizable backend implementations; implementation/validation remains open. Causal is backend configuration only. Redis Software 8.x targets three primary shards per regional database, plus replicas.
+Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. The proposed stronger options are a monotonic on/off modifier for Local/Available on either backend and the two Linearizable backend implementations; implementation/validation remains open. Causal is backend configuration only. Redis Software 8.x targets three primary shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
@@ -128,6 +128,7 @@ const configuration = {
   acknowledgment: "local",
   recovery: "request-only",
   readPolicy: "available",
+  monotonic: false, // Optional guarantee; true needs the proposed history integration.
   targets,
   groups, // Read targets; does not imply a write acknowledgment barrier.
   readGroup: "US", // Example for the west client; select EU for EU clients.
@@ -170,14 +171,23 @@ await sessionsE1.get(sessionId);
 
 These reads have no caller version/context input. A local null can be followed by a remote value for Available, but the first stale value still wins over a later newer one. If every reply is null, return null; if no value arrives by deadline, return null even when some requests are pending or failed. Return does not wait for loser cleanup. Record the winning region or all-null/deadline reason without logging payloads or bearer identifiers.
 
-## Benefits and costs of read policies
+Proposed modifier examples (unsupported until the history integration is implemented):
+
+```ts
+await sessionsA1.get(sessionId, { policy: "local", monotonic: true });
+await sessionsA1.get(sessionId, { policy: "available", monotonic: true });
+```
+
+These retain the selected strategy's endpoints. Local never expands into a group search; Available accepts only the first group value satisfying the retained read floor. No floor/version is supplied by business code, and the modifier does not add a write acknowledgment mode.
+
+## Benefits and costs of read strategies and the optional guarantee
 
 | Behavior | Benefit | Cost / limit |
 | --- | --- | --- |
 | Local | One regional read; avoids WAN read fan-out. | Can miss values present elsewhere; local errors remain errors. |
 | Available (default) | Can return a value from any selected group member including local without waiting for agreement. | More requests/connections; can return stale data or deadline-null despite a value elsewhere. |
-| Monotonic (proposed) | Prevent a caller's reads moving backward, using automatic read-history tracking on either backend. | Needs accepted state-ordering proofs; may wait/fail; no newest-write or RYOW guarantee. |
+| Monotonic modifier (proposed) | Prevent a caller's reads moving backward, using automatic read-history tracking on either backend. | Needs accepted state-ordering proofs; may wait/fail; no newest-write or RYOW guarantee. |
 | Linearizable over Active-Active | Real-time order and freshness per key in scope. | **slow++** reads and writes; Active-Active plus a custom validated coordination protocol, deferred. |
 | Linearizable over Coordinated | The same linearizable guarantee over independent clusters. | **slow++** reads and writes; custom validated ordering/commit/read/failure protocol, proposed and unimplemented. |
 
-Read policy selection never silently changes distribution, acknowledgment, or recovery. The guarantee/backend variants are explicit; reject unimplemented options and backend mismatches instead of falling back to Local/Available. Proposed Monotonic automatically filters the group race against the caller's last successful read floor and requires safe history updates/proofs. Removed `causal`/`causal-coordinated`/Session/exact-version selectors and ambiguous `coordinated` are not exposed. Native causal configuration is a backend setting. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
+Read policy selection never silently changes distribution, acknowledgment, or recovery. The guarantee/backend variants are explicit; reject unimplemented options and backend mismatches instead of falling back to Local/Available. Proposed `monotonic: true` filters/rechecks only local state with Local, or filters the group race with Available against the caller's last successful read floor and requires safe history updates/proofs. Removed `causal`/`causal-coordinated`/Session/exact-version selectors, standalone `monotonic` policy, and ambiguous `coordinated` are not exposed. The modifier defaults to false; an unimplemented true request must error rather than be ignored. Native causal configuration is a backend setting. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).

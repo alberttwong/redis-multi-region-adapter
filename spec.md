@@ -10,9 +10,9 @@ The public default is **Available** (`available`): concurrently query every regi
 
 **Local** (`local`) reads only the selected local cluster and returns its valid candidate or null. Redis Active-Active owns propagation in that backend; independent regional databases require adapter-managed write distribution. Local reads do not start regional read fan-out.
 
-Neither behavior guarantees read-your-own-writes, monotonic reads, or the newest completed write. Different values may exist; Available returns whichever valid value arrives first without comparing versions or waiting for agreement. Null on deadline is an availability outcome, not proof of absence throughout the group.
+With monotonic off, neither behavior guarantees read-your-own-writes, monotonic reads, or the newest completed write. Enabling the proposed modifier prevents read regression but still does not guarantee latest state or unread acknowledged writes. Different values may exist; Available returns whichever valid value arrives first without comparing versions or waiting for agreement. Null on deadline is an availability outcome, not proof of absence throughout the group.
 
-The Session and Causal read options and custom causal protocol workstream have been removed. Monotonic is a separate proposed guarantee over successful reads; it does not promise visibility of an unread acknowledged write. Record identities remain internal distribution/idempotency metadata, not a public read selector or freshness requirement. The experimental spike retains legacy controls and results; it is not this production API.
+The Session and Causal read options and custom causal protocol workstream have been removed. Monotonic is a proposed boolean modifier over successful Local/Available reads, default `false`, not a separate policy; it does not promise visibility of an unread acknowledged write. Record identities remain internal distribution/idempotency metadata, not a public read selector or freshness requirement. The experimental spike retains legacy controls and results; it is not this production API.
 
 ## Public read policies
 
@@ -20,11 +20,10 @@ The Session and Causal read options and custom causal protocol workstream have b
 | --- | --- | --- |
 | **Local** / `local` | Local cluster only, on either backend; Active-Active causal flag may be on or off | Valid local candidate or null; local infrastructure failures remain errors. |
 | **Available** / `available` (default) | Every member of the selected group, including local, on either backend; Active-Active causal flag may be on or off | First valid non-null value; null if all replies are null or the deadline expires without a value. |
-| **Monotonic** / `monotonic` (proposed) | Either backend; same group search as Available with automatic caller read-history enforcement | First valid value satisfying the last successful read floor; never regress. An established floor causes wait/failure if no acceptable state arrives; no latest-write guarantee. |
 | **Linearizable over Active-Active** / `linearizable` (deferred) | Active-Active + custom ordering/commit/read protocol | Real-time order per key; reflect writes completed before a read begins. Additional protocol unimplemented. |
 | **Linearizable over Coordinated** / `linearizable-coordinated` (proposed) | Independent clusters + custom ordering/commit/read protocol | The same linearizable guarantee; protocol unimplemented. |
 
-Resolve policy from the request override or store configuration, initially `available`. A Local or Available read still checks caller authorization, session/key binding, integrity, generation policy, and expiry. Policy selection never bypasses access checks.
+Resolve policy and modifier from request overrides or store configuration, initially `policy=available` and `monotonic=false`. The base Local/Available algorithms below describe monotonic off; the modifier adds the checks specified in its own section. A Local or Available read still checks caller authorization, session/key binding, integrity, generation policy, and expiry. Policy selection never bypasses access checks.
 
 ## Group membership and deadlines
 
@@ -58,9 +57,11 @@ These are behavioral proposals, not a shipping SDK schema.
 | `put(sessionId, payload, operationId)` | Store one immutable identified update at the origin and distribute under the configured write policy. |
 | `get(sessionId)` | Available using the configured local read group and deadline. |
 | `get(sessionId, { policy: "available", group: "US" })` | Race all configured US members, including local, after validating group membership. |
-| `get(sessionId, { policy: "local" })` | Query only local. |
+| `get(sessionId, { policy: "local" })` | Query only local, with monotonic off unless enabled in the effective configuration. |
+| `get(sessionId, { policy: "local", monotonic: true })` (proposed) | Query/recheck only local state while enforcing the caller's last tracked read floor. |
+| `get(sessionId, { policy: "available", monotonic: true })` (proposed) | Race group members including local and accept only candidates satisfying the caller's last tracked read floor. |
 
-Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, and unimplemented `monotonic`/`linearizable`/`linearizable-coordinated`). There is no public exact-version or caller-context read input.
+Configuration separates `distribution` (`active-active` or `independent`), `acknowledgment` (`local` baseline or explicit independent `all-targets`), independent `recovery` (`request-only` or `durable-replay`), `readPolicy` (`available` default or `local`), proposed boolean `monotonic` (`false` default), local endpoint, groups/read-group selection, target set/configuration epoch, deadlines, and fan-out limits. Reject unsupported policies (`session`, `greedy`, `required`, `latest`, `any`, removed `causal`/`causal-coordinated`, ambiguous `coordinated`, obsolete standalone `monotonic`, and unimplemented `linearizable`/`linearizable-coordinated`). Reject `monotonic: true` until the modifier integration is implemented; never silently ignore it. Non-boolean modifier values are invalid. There is no public exact-version or caller-context read input.
 
 ## Data, writes, and recovery
 
@@ -74,15 +75,22 @@ Serialize a logical update as required by its business rules, allocate operation
 
 Active-Active owns CRDT transport and strong eventual convergence. Independent mode must supply fan-out; request-only sends the next same-session update's current version and may leave an idle region stale indefinitely. Optional durable replay must atomically bind accepted snapshots to recoverable delivery obligations before success. Local acknowledgment does not wait for remote regions; all-target acknowledgment captures every configured target and reports partial/uncertain outcomes rather than shrinking the set. Readback verifies placement, not disk durability, atomic visibility, or linearizability. See [backends.md](backends.md).
 
-## Proposed Monotonic reads
+## Proposed monotonic modifier
 
-**Monotonic** (`monotonic`) asks: “Can I read without going backward from what I have already seen?” It targets the same guarantee on independent and Active-Active backends. Automatically retain each caller's last successful observed state per key, transport that protected floor across requests/regions, and accept only the same state or a proven later state in the accepted history. The guarantee applies to tracked Monotonic reads; do not imply that untracked earlier Local/Available reads established a floor.
+`monotonic: true` asks: “Can I read without going backward from what I have already seen?” It adds the same guarantee to Local or Available on either backend; it is not a `policy` value. Default `monotonic: false` preserves the base read behavior. Automatically retain each caller's last successful tracked state per key, transport that protected floor across requests/regions, and accept the same or a proven later state. Only successful reads with monotonic enabled establish/advance the floor; unread writes and untracked off-reads do not. Off-reads may regress but must never reduce a retained floor. Re-enabling the modifier resumes that retained floor; an expected floor that was lost is an error, not a new first read.
 
-Use the selected group, including local, with the bounded concurrent lookup mechanism of Available. With genuinely no prior observed floor, the first Monotonic read can return the first valid non-null candidate or ordinary all-null/deadline-null; it establishes a floor when an observed state is returned. Once a floor exists, an early stale/null/incomparable response cannot win. Keep searching/rechecking within the shared budget for an acceptable value. If none is found, return a typed history/freshness-unavailable error, not an older value or Available-style timeout-null. This does not wait for the newest completed write.
+| Effective strategy | Monotonic off | Monotonic on |
+| --- | --- | --- |
+| Local | One regional candidate; ordinary null/expiry or Local infrastructure errors. | Look up/recheck only the local candidate. If it meets the floor, return it; otherwise wait locally within the budget or fail. Never launch remote reads. |
+| Available | Concurrent group race including local; first valid non-null, or null on all-null/deadline. | Race the same group, accepting the first value satisfying the floor. Continue after older/null/incomparable candidates; bounded rechecks can wait for eligible state. With an established unexpired floor, no eligible state by deadline is an error, not arbitrary null. |
+
+With genuinely no prior floor, the first monotonic-on read follows its base strategy's discovery and ordinary absence/error behavior and establishes a floor when an observed state is returned. Once a floor exists, older/null/incomparable state cannot win. No acceptable state yields a typed history/freshness-unavailable error; the modifier overrides Available's all-null/deadline-null success when that would violate the floor. It never waits for the newest completed write.
+
+Preserve the floor across region, group, and Local/Available strategy changes while the modifier remains enabled. A strategy change does not broaden Local into a group search or reset history. For sequential operations on the same key in the same linearizable scope, linearizability already implies monotonic reads; the flag is redundant and must never weaken the stronger contract.
 
 A reliable version/history relation is required; arbitrary IDs, numeric labels, arrival time, or Redis last-write-wins alone do not prove that one state succeeds another. Define how concurrent versions, deletions, expiry, generations, and previously absent state participate in that history before implementation. A verified later deletion/tombstone may establish absence; a missing unexpired expected state cannot silently become null. Invalid/lost expected floors must not be treated as a first read. Middleware must serialize or otherwise safely combine a caller's concurrent read responses so the floor cannot roll back.
 
-Both backends need this automatic read-history integration; Active-Active supplies replication but its optional causal flag does not track the last state seen by a caller moving regions. Independent clusters additionally need an accepted state-ordering/evidence mechanism. No mechanism, token/state lifecycle, failure contract, or production SDK is implemented. Business code selects the behavior without manually passing versions. Writes do not by themselves advance the read floor; the removed Session/RYOW policy is not reinstated. See the [monotonic-read definition](https://www.mongodb.com/docs/manual/core/read-isolation-consistency-recency/#causal-consistency).
+Both Local/Available strategies on either backend need this automatic read-history integration when enabled; Active-Active supplies replication but its optional causal flag does not track the last state seen by a caller moving regions. Independent clusters additionally need an accepted state-ordering/evidence mechanism. No mechanism, token/state lifecycle, failure contract, or production SDK is implemented. Business code selects the behavior without manually passing versions. Writes do not by themselves advance the read floor; the removed Session/RYOW policy is not reinstated. See the [monotonic-read definition](https://www.mongodb.com/docs/manual/core/read-isolation-consistency-recency/#causal-consistency).
 
 ## Linearizable implementations and scope
 
@@ -92,13 +100,13 @@ Both protocols must cover write authority/serialization, safe commit/read rules,
 
 ## Backend validation and implementation status
 
-Local/Available remain the current baseline with Available as default. Proposed Monotonic can use either backend only after its automatic caller-history/state-ordering protocol is validated. Active-Active native causal consistency is optional backend configuration, not a read-policy selector or substitute for Monotonic enforcement.
+Local/Available remain the current baseline with Available as default. The proposed monotonic modifier can be enabled on Local/Available on either backend only after its automatic caller-history/state-ordering integration is validated. Active-Active native causal consistency is optional backend configuration, not a read-policy selector or substitute for Monotonic enforcement.
 
 `linearizable` uses Active-Active plus its custom protocol; `linearizable-coordinated` uses independent clusters plus its custom protocol. Reject unimplemented options, removed `causal`/`causal-coordinated`/Session/exact-version selectors, and mismatched configurations rather than downgrading. Each custom protocol must define its participants/conditions. None changes the existing write acknowledgment set automatically.
 
 ## Outcomes and observability
 
-Local absence is null; Available all-null and deadline-without-value are also null. Preserve distinct telemetry for Local miss, Available all-null, Available deadline-null, winning region, rejected/failed attempts, cancellation, and per-region latency. Successful read metadata may include actual record identity, region, effective policy, and captured group, without exposing credentials or payloads in logs.
+Local absence is null; Available all-null and deadline-without-value are also null. Preserve distinct telemetry for Local miss, Available all-null, Available deadline-null, winning region, rejected/failed attempts, cancellation, and per-region latency. Successful read metadata may include actual record identity, region, effective policy, effective monotonic flag, and captured group, without exposing credentials or payloads in logs.
 
 An internal write-placement verifier may report an expected snapshot as **snapshot missing**; that is separate from public read null semantics. Expiry is based on validated server-controlled expiry and an agreed clock-skew policy. Healthy endpoints, stored records, or a racing read do not establish current authorization after another device logs out.
 
@@ -122,9 +130,9 @@ An internal write-placement verifier may report an expected snapshot as **snapsh
 | R14 | State stale-read and linearizability/revocation limits explicitly | V07, V19 |
 | R15 | Measure end-to-end latency/outcome rates without leaking secrets | V13, V20 |
 | R16 | Validate guarantee/backend mapping and reject all unimplemented or mismatched stronger options; replace ambiguous Coordinated with its two explicit guarantees. | V21 |
-| R17 | Proposed Monotonic automatically preserves per-caller successful-read history across regions on either backend; reject regression, lost floors, and unprovable state. | V22, V23 |
+| R17 | Proposed monotonic-on Local/Available automatically preserve per-caller successful-read history across regions on either backend; reject regression, lost floors, and unprovable state. | V22, V23 |
 | R18 | Both linearizable implementations target the same real-time per-key freshness guarantee, including bounded wait/failure rather than stale/timeout-null results. | V24 |
 
 ## Open implementation decisions
 
-Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. Monotonic needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).
+Language/client, allowed group overrides, candidate/conflict rules, connection pooling, finite budgets, resource limits, exact capture/worker commands, persistence/retention, expiry/skew, and service levels remain unselected. The monotonic modifier needs automatic floor storage/transport, concurrent response sequencing, and proof of accepted state ordering including absence/expiry; both Linearizable implementations need ordering/commit/read/failover protocols. None is selected or validated. Prototype results do not complete the production acceptance suite. See [sources.md](sources.md), [plan.md](plan.md), and [latency.md](latency.md).

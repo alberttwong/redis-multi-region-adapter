@@ -12,6 +12,8 @@ Design documents plus an experimental AWS latency spike. Start with README.md, s
 
 ## Required behavior
 
+- Prefer Redis Enterprise native capabilities and existing compatible client facilities. Configure/document native conflict semantics, persistence/durability, expiration, eviction/capacity, pools, and timeouts; do not implement replacements. Custom baseline code is limited to selected read/write fan-out, optional all-target verification, and necessary validation, bounded execution, cleanup, and identity handling. Keep groups deployment-configured. Do not add custom clock correction, group/resource management, or service-level enforcement. Monotonic/Linearizable remain deferred extensions outside baseline implementation.
+
 - Default `available` with `monotonic: false`: query all selected group members concurrently, including local. Return the first valid non-null value; null on all-null completion or shared deadline without a value. An early null never beats a pending value.
 - Explicit `local`: query only local; valid value or null, with infrastructure errors separate. Active-Active handles propagation, or independent mode uses adapter write fan-out.
 - Session reads have been removed from production scope. No caller write-context/RYOW policy, public exact-version selector, or `greedy` policy. Proposed Monotonic does require accepted read-history proofs. Proposed `monotonic: true` on Local/Available and the `linearizable`/`linearizable-coordinated` policies need validated adapter/protocol integration before use.

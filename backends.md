@@ -53,7 +53,7 @@ There is no separate next-write refresh mode or durable replay option. The [Reco
 
 ## Discovery hints, membership, and restore
 
-At a destination, apply the immutable snapshot before publishing its discovery hint. Use a deterministic, backend-supported candidate/conflict rule and reject conflicting identity/content. A publication timestamp or larger numeric label does not establish global freshness. Local and Available validate candidates without caller write-context checks.
+At a destination, apply the immutable snapshot before publishing its discovery hint. Use the selected Redis data type's native conflict semantics and supported commands; document those semantics rather than adding a custom conflict-resolution engine. Reject conflicting identity/content during adapter validation. A publication timestamp or larger numeric label does not establish global freshness. Local and Available validate candidates without caller write-context checks.
 
 Independent target admission has no historical-backfill promise: new targets receive future writes. A separate baseline/backfill feature would require an explicit scope decision. Redis-managed Active-Active catch-up follows its backend readiness requirements.
 

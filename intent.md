@@ -24,6 +24,10 @@ Support Redis Software 8.x Active-Active or independent regional clusters with a
 
 A1 writing 42 does not make either read behavior wait for 42. Local reads the regional candidate; Available can obtain a value from any group member, including local, and an older first value can win. All-target write placement does not create linearizability. See [consistency.md](consistency.md), [backends.md](backends.md), and [spec.md](spec.md).
 
+## Prefer native Redis Enterprise capabilities
+
+Use Redis Enterprise native data/conflict semantics, persistence/durability, expiration, capacity/eviction, and existing client pooling/timeouts. Treat version/client selection, supported commands, configured groups, and limits as integration configuration, not new product features. Build only the selected baseline adapter behavior and necessary validation/cleanup. Automatic monotonic history and linearizable coordination remain deferred extensions requiring additional code; they are not supplied by the native baseline.
+
 ## Delivery and limits
 
 Build the proposed public API, validate bounded fan-out/cancellation/error semantics, and measure outcomes with the scenarios in [validation.md](validation.md). The [AWS spike](spike/README.md) retains historical controls/results; it does not implement the revised group-racing Available policy. No production SDK, linearizable protocol, or immediate cross-device revocation guarantee is established. Keep retained data, credentials, payloads, and bearer IDs out of logs and PR artifacts.

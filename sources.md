@@ -28,7 +28,7 @@ No production support matrix, approved linearizable protocol, or production serv
 
 ## Selected decisions
 
-Architecture guidance clarified on 2026-11-09: **both Active-Active and independent regional clusters are supported**. Active-Active is a soft recommendation when its additional native capabilities are useful, not a required or universally preferred backend. Independent fan-out provides a reduced capability subset; the adapter adds the same explicit Local/Available read contract on either backend. Choose based on capabilities, operations, and total cost without assuming either backend is cheaper.
+Architecture guidance clarified on 2026-11-09: **both Active-Active and independent regional clusters are supported**. Neither backend is recommended universally; Active-Active supplies additional native capabilities. Independent fan-out provides a reduced capability subset; the adapter adds the same explicit Local/Available read contract on either backend. Choose based on capabilities, operations, and total cost without assuming either backend is cheaper.
 
 All user decisions below were made on 2026-11-09. They select scope, not every proposed implementation mechanism.
 

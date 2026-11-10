@@ -1,6 +1,8 @@
 # Multi-region session consistency
 
-Design for **Available reads by default** (`available`) and explicit **Local reads** (`local`) on **Redis Software 8.x**. Each regional database has three primary data shards, with replicas additional. The per-region sizing interpretation remains an assumption to confirm.
+**Available reads by default.**
+
+The design targets Redis Software 8.x. Each regional database has three primary data shards, with replicas additional. The per-region sizing interpretation remains an assumption to confirm.
 
 ## Consistency
 

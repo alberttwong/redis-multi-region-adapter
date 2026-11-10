@@ -21,6 +21,22 @@ The [Read behavior section](#read-behavior) answers questions 1–5, with the ta
 
 **Status — 2026-11-09:** production design plus a legacy AWS/Terraform spike. The revised Local/Available API has no production SDK yet. Automatic monotonic enforcement and both linearizable protocols are unimplemented. The spike uses historical controls and does not implement the new Available group race. [spec.md](spec.md) is the authoritative behavior contract.
 
+## Questions and answers
+
+| # | Question | Answer | Details |
+| --- | --- | --- | --- |
+| 1 | **Read scope:** Local, geographic group, or global? | Local queries one cluster. Available races the configured geographic/global group, including local. Future linearizable scope must be defined by its protocol. | [Topology and groups](#topology-and-groups), [Read behavior](#read-behavior) |
+| 2 | **Read history:** May successive reads go backward? | **Off:** regression is permitted. **On:** proposed automatic monotonic enforcement prevents the caller from reading older state on the same key. | [Monotonic off](#read-behavior--monotonic-off-default), [Monotonic on](#read-behavior--monotonic-on-proposed) |
+| 3 | **Freshness:** Any valid value, or completed-write freshness? | Local/Available may return stale values. Monotonic adds a last-observed floor. Linearizable targets completed-write freshness within scope. | [Read behavior](#read-behavior), freshness columns |
+| 4 | **Coordination backend:** Active-Active or independent clusters? | Both have proposed Linearizable variants requiring custom coordination and matching writes. | [Read behavior](#read-behavior), backend columns |
+| 5 | **Read deadline:** How long to wait, then null or error? | Finite configured deadline; no default duration selected. Available with monotonic off returns null without a winner. Local deadline failures are errors. With an established unexpired monotonic floor, no eligible value means failure; future linearizable reads fail if freshness cannot be established. | [Read deadline chooser](#choose-the-behavior), [Read execution](#how-local-and-available-return-a-result) |
+| 6 | **Distribution:** Who sends regional copies? | Redis for Active-Active; adapter fan-out for independent clusters. | [Distribution](#distribution) |
+| 7 | **Acknowledgment:** Local acceptance or every target? | Local by default; independent clusters can use proposed all-target verification. | [Write behavior](#write-behavior) |
+| 8 | **Linearizable commit:** Must writes share a real-time order with reads? | Only through a future matching read/write coordination protocol, on either named backend. | [Write behavior](#write-behavior) |
+| 9 | **Missed delivery:** Who retries? | Redis handles Active-Active catch-up. Independent clusters have no background repair; later same-session writes distribute current state without promising historical repair. | [Recovery](#recovery) |
+
+Deadline behavior is explained in the read execution text; the two read comparison tables keep their existing columns. Native causal consistency remains supporting backend configuration, not a separate headline question or an automatic monotonic/linearizable guarantee. Automatic monotonic enforcement and both linearizable protocols remain **proposed and unimplemented**.
+
 ## Choose the behavior
 
 The chooser summarizes the detailed tables in the same order: reads, distribution, write acknowledgment/commit, and delivery recovery. Question numbers connect each choice to the list above. Read scope and deadlines have their own questions; the native causal flag remains supporting backend configuration.

@@ -2,6 +2,12 @@
 
 Status: planning model with an [experimental AWS measurement harness](spike/README.md). The [2026-11-09 baseline](spike/reports/aws-baseline-20261109.md) records real run results with sample counts and configuration; no production SLO or strict-consistency guarantee is inferred. Presets A–E and read policies refer to [decisions.md](decisions.md). This model does not select a deployment preset.
 
+## Qualitative latency labels
+
+The README uses four planning bands: **fast** for a regional path, **slow** for a remote-response path, **slow+** for inter-region coordination, and **slow++** for extra sequential WAN coordination or reaching the configured deadline. These are shorthand for assumed request paths, not measured milliseconds, fixed bounds, or guaranteed rankings.
+
+Under local acknowledgment, Local and Causal reads/writes are provisionally fast. Available reads are provisionally slow, but local winners can be fast and no-value deadlines slow++; its baseline writes remain fast. Coordinated and Linearizable provisionally use slow+ for both reads and writes, assuming inter-region coordination; their undefined protocols could add slow++ paths or optimize some operations. All-target writes add remote waits. Revisit ratings after protocol selection and real measurements.
+
 ## Measure the right operation
 
 Measure from application invocation to its returned result, including middleware, pool queues, Redis/network work, group dispatch, retries, verification, and waiting. Report write acknowledgment, read response, and background delivery separately. A server command benchmark does not measure the proposed adapter's group-read or write fan-out path. Redis's [benchmarking guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/) discusses workload/client effects; its [latency guidance](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/) distinguishes client/network and server sources of delay. Neither supplies this deployment's p99.

@@ -9,7 +9,7 @@ The production default is **Available** (`available`); **Local** (`local`) is ex
 | How do copies propagate? | Active-Active or independent fan-out | Redis handles eventual transport, or the adapter supplies distribution/recovery. |
 | How is a value read? | Local; Available (default) | One local candidate, or the first non-null candidate from a concurrent group race including local. |
 | Which clusters are searched? | Configured read group | US, EU, or an explicitly configured all-five group; membership is captured for each Available request. |
-| Is stronger ordering required? | Causal on Active-Active; Coordinated on independent clusters (proposed); Linearizable on Active-Active (deferred) | Causal uses native per-key dependency ordering without catch-up; Coordinated guarantees remain undefined; Linearizable needs a real-time ordering protocol. |
+| Is stronger ordering required? | Causal or Linearizable, each over Active-Active or Coordinated | The guarantee and backend are separate. Causal permits lag; Linearizable targets real-time freshness. |
 
 Neither supported read behavior provides RYOW, newest-value selection, or quorum agreement. Available can return a stale first value; timeout-null means no value arrived in time.
 
@@ -17,23 +17,24 @@ Neither supported read behavior provides RYOW, newest-value selection, or quorum
 
 Local and Available work with Active-Active or independent regional clusters. Active-Active provides CRDT replication and strong eventual convergence; independent clusters require application distribution and recovery. Request-only refresh may leave idle regions stale indefinitely without another write.
 
-This project requires Active-Active for the **Linearizable** mode. Active-Active alone does not provide linearizability: real-time write ordering, safe reads, fencing, partitions, and recovery still require a separate validated protocol. **Coordinated** is a distinct proposed mode for independent, non-Active-Active clusters, targeting linearizable-like access through application coordination. Its precise freshness/ordering contract is not yet defined. These backend constraints are project choices; neither mode is implemented, and no guarantee follows from replication or placement alone. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
+Active-Active supplies native per-key causal ordering when enabled, not linearizability. Independent clusters can target causal or full linearizable guarantees through custom coordination. Both linearizable variants require an additional validated ordering/commit/read/failure protocol; none follows from replication or placement alone. No such custom protocol is implemented. See [Redis Active-Active](https://redis.io/docs/latest/operate/rs/databases/active-active/).
 
-## Proposed stronger read options
+## Ordering guarantee versus implementation
 
-| Option | Required backend in this project | Freshness / ordering status |
-| --- | --- | --- |
-| Causal | Active-Active with causal consistency enabled | Native ordering of causally related operations on the same key; reads may still lag. No newest-write/catch-up guarantee. |
-| Coordinated | Independent clusters; no Active-Active | Linearizable-like target only. Authority, commit/read rules, ordering, failover, and timeout/partition semantics remain unspecified; no freshness guarantee is claimed. |
-| Linearizable | Active-Active plus a separate coordination overlay | Real-time ordering per key is the intended contract; the overlay is deferred and unvalidated. |
+| Option | Backend | Target ordering | Latest-write freshness? |
+| --- | --- | --- | --- |
+| Causal over Active-Active | Active-Active with native causal consistency enabled | Same-key causal dependencies, enforced by Redis. | No regional catch-up guarantee. |
+| Causal over Coordinated | Independent clusters + custom protocol | Same-key causal dependencies, enforced by the application. | No regional catch-up guarantee. |
+| Linearizable over Active-Active | Active-Active + custom protocol | One real-time order per key in scope. | Yes by contract; implementation deferred. |
+| Linearizable over Coordinated | Independent clusters + custom protocol | The same real-time order per key in scope. | Yes by contract; implementation proposed. |
 
-“Coordinated” names the implementation approach without inventing a weaker form of linearizability. It is not a built-in Redis read setting, a quorum race, or the removed Session option. Causal uses a native Redis configuration feature and needs adapter/deployment validation; it requires less custom ordering code than building comparable coordination over independent clusters. Coordinated and Linearizable still need new protocols. Group settings alone enable none of these guarantees.
+Coordination is an implementation approach; causal and linearizable name guarantees. Native causal ordering needs less custom ordering code than building comparable dependency tracking/application on independent clusters. Both linearizable implementations require custom coordination, regardless of their replication backend. All adapter/custom protocol integrations remain proposed or deferred; the table is not evidence of an implemented guarantee.
 
 ### Causal order versus caught-up reads
 
-A1 applies A=`41`, then B=`42` after observing A on the same key. A causal-enabled Active-Active database preserves A-before-B across its instances, but Europe may still return `40` while replication is behind. A Linearizable read beginning after B completes must instead return B or later state, or wait/fail if it cannot establish that guarantee. Ordering and freshness are separate properties.
+A1 applies A=`41`, then B=`42` after observing A on the same key. Either causal implementation must preserve A-before-B visibility, but Europe may still return `40` before receiving the updates. Either linearizable implementation must reflect B or later state on a read starting after B completes, or wait/fail if it cannot establish the guarantee. Causal ordering is not a real-time catch-up guarantee.
 
-Use **Causal (Active-Active)** for Redis's strong eventual convergence plus optional per-key causal ordering. Do not call that native feature Linearizable or imply cross-key causal guarantees. [Redis documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) describes the native ordering and its replication overhead.
+Use **Causal over Active-Active** for Redis's strong eventual convergence plus enabled per-key causal ordering. [Redis documentation](https://redis.io/docs/latest/operate/rs/databases/active-active/causal-consistency/) describes the native feature and replication overhead. **Causal over Coordinated** would implement the corresponding same-key dependency guarantee in application code over independent clusters. Neither promises cross-key causality in this design.
 
 ## Reference topology
 

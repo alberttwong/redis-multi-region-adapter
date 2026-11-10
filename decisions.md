@@ -1,6 +1,6 @@
 # Deployment and write-policy decisions
 
-Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. Coordinated reads are proposed for independent clusters with guarantees unselected; Causal uses native causal-enabled Active-Active per-key ordering without catch-up; the separate Linearizable option needs an additional coordination overlay and remains deferred. Redis Software 8.x targets three primary shards per regional database, plus replicas.
+Status: proposed production Local/Available API with a legacy AWS spike. Available is default and races the selected group including local; Session reads have been removed. The proposed stronger options are Causal over Active-Active, Causal over Coordinated, Linearizable over Active-Active, and Linearizable over Coordinated; implementation/validation remains open. Redis Software 8.x targets three primary shards per regional database, plus replicas.
 
 ## Selected versus configurable
 
@@ -174,8 +174,9 @@ These reads have no caller version/context input. A local null can be followed b
 | --- | --- | --- |
 | Local | One regional read; avoids WAN read fan-out. | Can miss values present elsewhere; local errors remain errors. |
 | Available (default) | Can return a value from any selected group member including local without waiting for agreement. | More requests/connections; can return stale data or deadline-null despite a value elsewhere. |
-| Causal (proposed adapter integration) | Native Active-Active causal configuration preserves same-key dependencies, reducing custom ordering code. | Reads can lag; requires deployment checks. Causal replication adds traffic/memory/performance overhead, not a global freshness barrier. |
-| Coordinated (proposed) | Targets linearizable-like access on independent, non-Active-Active clusters through application coordination. | Exact freshness/order/failure guarantees and the protocol are undefined; unsupported. |
-| Linearizable (deferred) | Would supply real-time ordering per key within its scope. | Requires Active-Active in this project plus a validated coordination overlay; Active-Active alone does not supply it. |
+| Causal over Active-Active | Native per-key causal ordering, with less custom ordering code. | Replicas may lag; native causal configuration and adapter checks are required. |
+| Causal over Coordinated | Same-key causal ordering over independent clusters. | Custom dependency/replication/recovery protocol remains unimplemented; no real-time freshness. |
+| Linearizable over Active-Active | Real-time order and freshness per key in scope. | Active-Active plus a custom validated coordination protocol; deferred. |
+| Linearizable over Coordinated | The same linearizable guarantee over independent clusters. | Custom validated ordering/commit/read/failure protocol; proposed and unimplemented. |
 
-Read policy selection never silently changes distribution, acknowledgment, or recovery. Proposed Causal requires causal-enabled Active-Active; Coordinated targets independent clusters; deferred Linearizable requires Active-Active plus its additional protocol. These are project backend rules, not native guarantees. Causal adapter integration and both custom protocols need validation before use; reject unimplemented options rather than substituting Local/Available. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
+Read policy selection never silently changes distribution, acknowledgment, or recovery. The guarantee/backend variants are explicit; reject unimplemented options and backend mismatches instead of falling back to Local/Available. The ambiguous `coordinated` policy is replaced by `causal-coordinated` and `linearizable-coordinated`. Authorization, integrity, and expiry still apply. There is no Session policy or public exact-version read. See [spec.md](spec.md), [backends.md](backends.md), and [validation.md](validation.md).
